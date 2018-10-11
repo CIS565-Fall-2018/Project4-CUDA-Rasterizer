@@ -638,7 +638,24 @@ void _vertexTransformAndAssembly(
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
 		// Then divide the pos by its w element to transform into NDC space
 		// Finally transform x and y to viewport space
+		
+		VertexOut & vOut =  primitive.dev_verticesOut[vid];
 
+		// screen-space pos
+		vOut.pos = MVP * glm::vec4(primitive.dev_position[vid], 1.0f); 
+		vOut.pos /= vOut.pos.w;
+		vOut.pos.x = 0.5f * (float)width * (vOut.pos.x + 1.0f);
+		vOut.pos.y = 0.5f * (float)height * (vOut.pos.y + 1.0f);
+
+		// eye-space pos
+		vOut.eyePos = glm::vec3(MV * glm::vec4(primitive.dev_position[vid], 1.0f));
+
+		// eye-space normal
+		vOut.eyeNor = MV_normal * primitive.dev_normal[vid];
+		vOut.eyeNor = glm::normalize(vOut.eyeNor);
+
+		vOut.texcoord0 = primitive.dev_texcoord0[vid];
+		vOut.dev_diffuseTex = primitive.dev_diffuseTex;
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
 		
@@ -660,12 +677,12 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
 
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
+		int pid;	// id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 
 		// TODO: other primitive types (point, line)
