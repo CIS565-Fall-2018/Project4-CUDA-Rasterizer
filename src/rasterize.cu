@@ -113,6 +113,8 @@ static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
 static float * dev_depth = NULL;	// you might need this buffer when doing depth test
+static unsigned int* dev_mutex = NULL;
+
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -162,12 +164,18 @@ void rasterizeInit(int w, int h) {
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
+
     cudaFree(dev_framebuffer);
     cudaMalloc(&dev_framebuffer,   width * height * sizeof(glm::vec3));
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(float));
+
+	cudaFree(dev_mutex);
+	cudaMalloc((void **)&dev_mutex, sizeof(unsigned int));
+	cudaMemset(dev_mutex, 0, sizeof(unsigned int));
+
 
 	checkCUDAError("rasterizeInit");
 }
@@ -716,8 +724,6 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]	= primitive.dev_verticesOut[primitive.dev_indices[iid]];
 			dev_primitives[pid + curPrimitiveBeginId].primitiveType = primitive.primitiveType;
-
-
 		}
 		// TODO: other primitive types (point, line)
 	}
@@ -725,7 +731,7 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 
 __global__
-void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth)
+void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth, unsigned int* mutexLock)
 {
 	const int primitiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -764,12 +770,27 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 					{
 						// Get the interop depth
 						const float currDepth = getZAtCoordinate(baryCoord, triangle);
-						if (currDepth < dev_depth[pixelIndex])
-						{
-							// Update frame buffer and depth buffer
-							dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.0f, 1.0f, 1.0f);
-							dev_depth[pixelIndex] = currDepth;
-						}
+
+						bool isSet;
+						do {
+							isSet = (atomicCAS(mutexLock, 0, 1) == 0);
+							if (isSet) {
+
+								if (currDepth < dev_depth[pixelIndex])
+								{
+									// Update frame buffer and depth buffer
+									dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.0f, 1.0f, 1.0f);
+									dev_depth[pixelIndex] = currDepth;
+								}
+							}
+							if (isSet) {
+								*mutexLock = 0;
+							}
+						} while (!isSet);
+
+
+
+						
 					}
 				}
 			}
@@ -841,7 +862,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 		dim3 numThreadsPerBlock(128);
 		dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
-		_rasterizePrimitive << <numBlocksForPrimitives, numThreadsPerBlock >> > (width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth);
+		cudaMemset(dev_mutex, 0, sizeof(unsigned int));
+
+		_rasterizePrimitive << <numBlocksForPrimitives, numThreadsPerBlock >> > (width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex);
 		checkCUDAError("Rasterizer");
 	}
 
@@ -893,6 +916,10 @@ void rasterizeFree() {
 
 	cudaFree(dev_depth);
 	dev_depth = NULL;
+
+	cudaFree(dev_mutex);
+	dev_mutex = NULL;
+
 
     checkCUDAError("rasterize Free");
 }
