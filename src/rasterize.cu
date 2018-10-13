@@ -104,6 +104,10 @@ static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2Primitiv
 static int width = 0;
 static int height = 0;
 static int screenDepth = 0;
+// For anti-aliasing
+static int screenWidth = 0;
+static int screenHeight = 0;
+static int aa = 1;
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
@@ -111,24 +115,38 @@ static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
-static int32_t * dev_intdepth = NULL;
 
 static int *mutex;
+
+static glm::vec3 lightDir = -glm::normalize(glm::vec3(1, -1, -1));
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
  */
 __global__ 
-void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
+void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image, int aaSize, int largeW) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
     if (x < w && y < h) {
         glm::vec3 color;
-        color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-        color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-        color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+
+        for (int i = 0; i < aaSize; i++) {
+            for (int j = 0; j < aaSize; j++) {
+                int tempIndex = ((aaSize * x) + i) + (((aaSize * y) + j) * largeW);
+                color.x += glm::clamp(image[tempIndex].x, 0.0f, 1.0f) * 255.0;
+                color.y += glm::clamp(image[tempIndex].y, 0.0f, 1.0f) * 255.0;
+                color.z += glm::clamp(image[tempIndex].z, 0.0f, 1.0f) * 255.0;
+            }
+        }
+
+        int aaSize2 = aaSize * aaSize;
+        color /= aaSize2;
+
+        //color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
+        //color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
+        //color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
         pbo[index].x = color.x;
@@ -141,7 +159,7 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, const glm::vec3 light) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
@@ -153,7 +171,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
         //framebuffer[index] = glm::vec3((float)x/w, (float)y/h, 0);
         //framebuffer[index] = glm::vec3((float) y / h, (float) x / w, 0);
 
-        float lambert = glm::abs(glm::dot(glm::normalize(fragmentBuffer[index].eyeNor), glm::normalize(glm::vec3(1, 0, 1))));
+        float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, light), 0.f, 1.f);
 
         framebuffer[index] = fragmentBuffer[index].color * lambert;
     }
@@ -163,10 +181,13 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
  * Called once at the beginning of the program to allocate memory.
  */
 void rasterizeInit(int w, int h) {
-    width = w;
+    screenWidth = w;
+    screenHeight = h;
 
-    height = h;
+    width = aa * screenWidth;
+    height = aa * screenHeight;
     screenDepth = INT_MAX;
+
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -180,14 +201,11 @@ void rasterizeInit(int w, int h) {
     cudaMalloc((void **) &mutex, width * height * sizeof(int));
     cudaMemset(mutex, 0, width * height * sizeof(int));
 
-    cudaFree(dev_intdepth);
-    cudaMalloc(&dev_intdepth, width * height * sizeof(int));
-
 	checkCUDAError("rasterizeInit");
 }
 
 __global__
-void initDepth(int w, int h, int * depth, int32_t *intdepth)
+void initDepth(int w, int h, int * depth)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -196,7 +214,6 @@ void initDepth(int w, int h, int * depth, int32_t *intdepth)
 	{
 		int index = x + (y * w);
 		depth[index] = INT_MAX;
-        intdepth[index] = INT32_MAX;
 	}
 }
 
@@ -758,7 +775,7 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                                 depth[index] = z;
 
                                 // Calculate normal
-                                fragmentBuffer[index].eyeNor = (bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor);
+                                fragmentBuffer[index].eyeNor = glm::normalize((bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor));
                             }
                         }
                         if (isSet) {
@@ -832,17 +849,17 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	}
 	
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
-	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth, dev_intdepth);
+	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// TODO: rasterize
     rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth, mutex, screenDepth);
 
 
     // Copy depthbuffer colors into framebuffer
-	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
+	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, lightDir);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, screenWidth, screenHeight, dev_framebuffer, aa, width);
     checkCUDAError("copy render result to pbo");
 }
 
@@ -886,8 +903,6 @@ void rasterizeFree() {
 
     cudaFree(mutex);
     mutex = NULL;
-    cudaFree(dev_intdepth);
-    dev_intdepth = NULL;
 
     checkCUDAError("rasterize Free");
 }
