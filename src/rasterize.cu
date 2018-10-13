@@ -46,7 +46,7 @@ namespace {
 		// glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
+		 int texWidth, texHeight;
 		// ...
 	};
 
@@ -638,10 +638,33 @@ void _vertexTransformAndAssembly(
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
 		// Then divide the pos by its w element to transform into NDC space
 		// Finally transform x and y to viewport space
+		glm::vec4 pos = glm::vec4(primitive.dev_position[vid], 1.f);
+		pos = MVP * pos;
+		pos = pos / pos.z;
+		pos.x = (pos.x + 1.f) * 0.5f * width;
+		pos.y = (1.f - pos.y) * 0.5f * height;
+		primitive.dev_verticesOut[vid].pos = pos;
+		glm::vec4 eyePos = glm::vec4(primitive.dev_position[vid], 1.f);
+		eyePos = MV * eyePos;
+		eyePos = eyePos / eyePos.z;
+		primitive.dev_verticesOut[vid].eyePos = glm::vec3(eyePos);
+		glm::vec3 eyeNor = primitive.dev_normal[vid];
+		primitive.dev_verticesOut[vid].eyeNor = glm::normalize(MV_normal * eyeNor);
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-		
+		if (primitive.dev_texcoord0 != NULL) {
+			primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
+		}
+		else {
+			primitive.dev_verticesOut[vid].texcoord0 = glm::vec2(0.f, 0.f);
+		}
+		if (primitive.dev_diffuseTex != NULL) {
+			primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
+			primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
+			primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
+		}
+
 	}
 }
 
@@ -660,12 +683,12 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
 
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
+		int pid;	// id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 
 		// TODO: other primitive types (point, line)
