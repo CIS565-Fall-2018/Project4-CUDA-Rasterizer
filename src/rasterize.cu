@@ -112,7 +112,7 @@ static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
-static int * dev_depth = NULL;	// you might need this buffer when doing depth test
+static float * dev_depth = NULL;	// you might need this buffer when doing depth test
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -167,13 +167,13 @@ void rasterizeInit(int w, int h) {
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
-	cudaMalloc(&dev_depth, width * height * sizeof(int));
+	cudaMalloc(&dev_depth, width * height * sizeof(float));
 
 	checkCUDAError("rasterizeInit");
 }
 
 __global__
-void initDepth(int w, int h, int * depth)
+void initDepth(int w, int h, float * depth)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -181,7 +181,7 @@ void initDepth(int w, int h, int * depth)
 	if (x < w && y < h)
 	{
 		int index = x + (y * w);
-		depth[index] = INT_MAX;
+		depth[index] = FLT_MAX;
 	}
 }
 
@@ -725,7 +725,7 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 
 __global__
-void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, int* dev_depth)
+void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth)
 {
 	const int primitiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
 
