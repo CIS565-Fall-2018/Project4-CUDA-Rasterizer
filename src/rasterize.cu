@@ -237,6 +237,45 @@ void _nodeMatrixTransform(
 	}
 }
 
+__device__ __host__
+glm::vec4 NDCToScreenSpace(glm::vec4* v, int width, int height)
+{
+	glm::vec4 screenCoords(0.f, 0.f, 0.f, 1.f);
+	screenCoords[0] = ((*v)[0] + 1.f) * width / 2.f;
+	screenCoords[1] = (1.f - (*v)[1]) * height / 2.f;
+	return screenCoords;
+}
+
+__device__ __host__
+glm::vec4 GetTriangleBounds(glm::vec4* v1, glm::vec4* v2, glm::vec4* v3, int width, int height)
+{
+	glm::vec4 bounds(0.f, 0.f, 0.f, 1.f);
+
+	const float minX = glm::min(glm::min((*v1)[0], (*v2)[0]), (*v3)[0]);
+	const float maxX = glm::max(glm::max((*v1)[0], (*v2)[0]), (*v3)[0]);
+	
+	const float minY = glm::min(glm::min((*v1)[1], (*v2)[1]), (*v3)[1]);
+	const float maxY = glm::max(glm::max((*v1)[1], (*v2)[1]), (*v3)[1]);
+
+	bounds[0] = glm::clamp(minX, 0.f, float(width));
+	bounds[1] = glm::clamp(minY, 0.f, float(height));
+	bounds[2] = glm::clamp(maxX, 0.f, float(width));
+	bounds[3] = glm::clamp(maxY, 0.f, float(height));
+
+	return bounds;
+}
+
+__host__ __device__
+glm::vec3 GetBaryCentric(const glm::vec3* currentPoint, const glm::vec3* p1, const glm::vec3* p2, const glm::vec3* p3)
+{
+	const glm::vec3 s1 = glm::cross(((*currentPoint) - (*p2)), ((*p3) - (*p2)));
+	const glm::vec3 s2 = glm::cross(((*currentPoint) - (*p1)), ((*p2) - (*p1)));
+	const glm::vec3 s3 = glm::cross(((*currentPoint) - (*p3)), ((*p1) - (*p3)));
+	const float area = glm::length(glm::cross(((*p1) - (*p2)) , ((*p3) - (*p2))));
+	const glm::vec3 influence = glm::vec3(0.f);// glm::vec3(glm::length(s1) / area, glm::length(s2) / area, glm::length(s3) / area);
+	return influence;
+}
+
 glm::mat4 getMatrixFromNodeMatrixVector(const tinygltf::Node & n) {
 	
 	glm::mat4 curMatrix(1.0);
@@ -646,7 +685,13 @@ void _vertexTransformAndAssembly(
 		for (int i = 0; i < numVertices; ++i)
 		{
 			const VertexAttributePosition inPos = primitive.dev_position[i];
-			primitive.dev_verticesOut[i].pos = MVP * glm::vec4(inPos, 1.0f);
+			
+			// This is in NDC Space
+			glm::vec4 outPos = MVP * glm::vec4(inPos, 1.0f);
+
+			// Convert to screen Space
+			primitive.dev_verticesOut[i].pos = NDCToScreenSpace(&outPos, width, height);
+
 		}
 
 		// TODO: Apply vertex assembly here
@@ -691,22 +736,42 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 
 		if (primitive.primitiveType == Triangle) 
 		{
-			// TODO 1: Ideally we need to check depth, but to get things started, fuck it
-
+			// Vertices in screen Space
 			VertexOut v1 = primitive.v[0];
 			VertexOut v2 = primitive.v[1];
 			VertexOut v3 = primitive.v[2];
 
-			int boundLeft = 0;
-			int boundRight = 200;
-			int boundTop = 0;
-			int boundBottom = 200;
+			glm::vec3 triangle[3];
+			triangle[0] = glm::vec3(v1.pos);
+			triangle[1] = glm::vec3(v2.pos);
+			triangle[2] = glm::vec3(v3.pos);
 
-			for (int row = boundTop; row < boundBottom; ++row)
+			const AABB bounds = getAABBForTriangle(triangle);
+
+			for (int row = bounds.min[1]; row < bounds.max[1]; ++row)
 			{
-				for (int col = boundLeft; col < boundRight; ++col)
+				for (int col = bounds.min[0]; col < bounds.max[0]; ++col)
 				{
-					dev_fragmentBuffer[col + row * width].color = glm::vec3(1.0f, 1.0f, 1.0f);
+					const int pixelIndex = col + row * width;
+					const glm::vec2 currPos(col, row);
+					
+					// Calculate BaryCentric coordinates
+					const glm::vec3 baryCoord = calculateBarycentricCoordinate(triangle, currPos);
+
+					// Check if point is inside triangle
+					const bool isInside = isBarycentricCoordInBounds(baryCoord);
+
+					if (isInside)
+					{
+						// Get the interop depth
+						const float currDepth = getZAtCoordinate(baryCoord, triangle);
+						if (currDepth < dev_depth[pixelIndex])
+						{
+							// Update frame buffer and depth buffer
+							dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.0f, 1.0f, 1.0f);
+							dev_depth[pixelIndex] = currDepth;
+						}
+					}
 				}
 			}
 		}
