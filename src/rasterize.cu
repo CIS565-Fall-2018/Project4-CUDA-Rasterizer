@@ -46,7 +46,7 @@ namespace {
 		// glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
+		int texWidth, texHeight;
 		// ...
 	};
 
@@ -64,8 +64,9 @@ namespace {
 
 		glm::vec3 eyePos;	// eye space position used for shading
 		glm::vec3 eyeNor;
-		// VertexAttributeTexcoord texcoord0;
-		// TextureData* dev_diffuseTex;
+		VertexAttributeTexcoord texcoord0;
+		TextureData* dev_diffuseTex;
+        int texWidth, texHeight;
 		// ...
 	};
 
@@ -107,7 +108,7 @@ static int screenDepth = 0;
 // For anti-aliasing
 static int screenWidth = 0;
 static int screenHeight = 0;
-static int aa = 1;
+static int aa = 2;
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
@@ -690,6 +691,13 @@ void _vertexTransformAndAssembly(
         vo.pos = projected; // glm::vec4(primitive.dev_position[vid], 1);
         vo.eyePos = glm::vec3(MV * glm::vec4(pos, 1));
         vo.eyeNor = MV_normal * primitive.dev_normal[vid];
+
+        if (primitive.dev_diffuseTex) {
+            vo.texcoord0 = primitive.dev_texcoord0[vid];
+            vo.dev_diffuseTex = primitive.dev_diffuseTex;
+            vo.texWidth = primitive.diffuseTexWidth;
+            vo.texHeight = primitive.diffuseTexHeight;
+        }
         //vo.texcoord0 = primitive.dev_texcoord0[vid];
 
         primitive.dev_verticesOut[vid] = vo;
@@ -759,7 +767,9 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                 bary = calculateBarycentricCoordinate(tri, pixel);
 
                 if (isBarycentricCoordInBounds(bary)) {
-                    int z = (-getZAtCoordinate(bary, tri)) * sDepth;
+                    //int z = (-getZAtCoordinate(bary, tri)) * sDepth;
+                    float z = perspectiveCorrectZ(tri, bary);
+                    int weird_z = z * sDepth;
 
                     
                     // Loop-wait until this thread is able to execute its critical section.
@@ -770,12 +780,33 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                             // Critical section goes here.
                             // The critical section MUST be inside the wait loop;
                             // if it is afterward, a deadlock will occur.
-                            if (z < depth[index]) {
-                                fragmentBuffer[index].color = glm::vec3(1, 1, 0);
-                                depth[index] = z;
+                            if (weird_z < depth[index]) {
+                                
+                                depth[index] = weird_z;
 
                                 // Calculate normal
                                 fragmentBuffer[index].eyeNor = glm::normalize((bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor));
+
+                                // Calculate perspective correct UV coordinates
+                                if (p.v[0].dev_diffuseTex) {
+                                    glm::vec3 uv[3];
+                                    uv[0] = glm::vec3(p.v[0].texcoord0, 0);
+                                    uv[1] = glm::vec3(p.v[1].texcoord0, 0);
+                                    uv[2] = glm::vec3(p.v[2].texcoord0, 0);
+
+                                    glm::vec3 final_uv = perspectiveCorrectInterpolation(tri, z, uv, bary);
+
+                                    int u = final_uv.x * p.v[0].texWidth;
+                                    int v = final_uv.y * p.v[0].texHeight;
+
+                                    fragmentBuffer[index].color.r = p.v[0].dev_diffuseTex[(u + (v * p.v[0].texWidth)) * 3];
+                                    fragmentBuffer[index].color.g = p.v[0].dev_diffuseTex[((u + (v * p.v[0].texWidth)) * 3) + 1];
+                                    fragmentBuffer[index].color.b = p.v[0].dev_diffuseTex[((u + (v * p.v[0].texWidth)) * 3) + 2];
+
+                                }
+                                else {
+                                    fragmentBuffer[index].color = glm::vec3(1, 1, 0);
+                                }
                             }
                         }
                         if (isSet) {
