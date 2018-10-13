@@ -691,7 +691,6 @@ void _vertexTransformAndAssembly(
 
 			// Convert to screen Space
 			primitive.dev_verticesOut[i].pos = NDCToScreenSpace(&outPos, width, height);
-
 		}
 
 		// TODO: Apply vertex assembly here
