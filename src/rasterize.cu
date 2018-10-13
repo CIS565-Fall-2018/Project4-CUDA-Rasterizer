@@ -62,8 +62,8 @@ namespace {
 		// The attributes listed below might be useful, 
 		// but always feel free to modify on your own
 
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;
 		// VertexAttributeTexcoord texcoord0;
 		// TextureData* dev_diffuseTex;
 		// ...
@@ -103,6 +103,7 @@ static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2Primitiv
 
 static int width = 0;
 static int height = 0;
+static int screenDepth = 0;
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
@@ -110,6 +111,9 @@ static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
+static int32_t * dev_intdepth = NULL;
+
+static int *mutex;
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -143,11 +147,15 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     int index = x + (y * w);
 
     if (x < w && y < h) {
-        framebuffer[index] = fragmentBuffer[index].color;
+        //framebuffer[index] = fragmentBuffer[index].color;
 
 		// TODO: add your fragment shader code here
         //framebuffer[index] = glm::vec3((float)x/w, (float)y/h, 0);
         //framebuffer[index] = glm::vec3((float) y / h, (float) x / w, 0);
+
+        float lambert = glm::abs(glm::dot(glm::normalize(fragmentBuffer[index].eyeNor), glm::normalize(glm::vec3(1, 0, 1))));
+
+        framebuffer[index] = fragmentBuffer[index].color * lambert;
     }
 }
 
@@ -156,7 +164,9 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
  */
 void rasterizeInit(int w, int h) {
     width = w;
+
     height = h;
+    screenDepth = INT_MAX;
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -167,11 +177,17 @@ void rasterizeInit(int w, int h) {
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(int));
 
+    cudaMalloc((void **) &mutex, width * height * sizeof(int));
+    cudaMemset(mutex, 0, width * height * sizeof(int));
+
+    cudaFree(dev_intdepth);
+    cudaMalloc(&dev_intdepth, width * height * sizeof(int));
+
 	checkCUDAError("rasterizeInit");
 }
 
 __global__
-void initDepth(int w, int h, int * depth)
+void initDepth(int w, int h, int * depth, int32_t *intdepth)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -180,6 +196,7 @@ void initDepth(int w, int h, int * depth)
 	{
 		int index = x + (y * w);
 		depth[index] = INT_MAX;
+        intdepth[index] = INT32_MAX;
 	}
 }
 
@@ -648,6 +665,8 @@ void _vertexTransformAndAssembly(
         projected.x *= width;
         projected.y *= height;
 
+        projected.z = (projected.z + 1.f) * 0.5f;
+
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
         VertexOut vo;
@@ -692,7 +711,7 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 * Rasterization
 */
 __global__
-void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primitive* dev_primitives, int * depth) {
+void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primitive* dev_primitives, int * depth, int* mutex, int sDepth) {
     // index id
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -707,23 +726,58 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
 
         glm::vec2 pixel;
         glm::vec3 bary;
-        for (int j = 0; j < h; j++) {
-            for (int i = 0; i < w; i++) {
-                int index = i + (j * w);
 
-                //fragmentBuffer[index].color = glm::vec3((float)i / w, (float)j / h, 0);
-                //continue;
+        AABB aabb = getAABBForTriangle(tri);
+        aabb.min.x = glm::min((float)w - 1, glm::max(0.f, aabb.min.x));
+        aabb.min.y = glm::min((float) h - 1, glm::max(0.f, aabb.min.y));
+        aabb.max.x = glm::max(0.f, glm::min((float) w - 1, aabb.max.x));
+        aabb.max.y = glm::max(0.f, glm::min((float) h - 1, aabb.max.y));
+
+        for (int j = aabb.min.y; j <= aabb.max.y; j++) {
+            for (int i = aabb.min.x; i <= aabb.max.x; i++) {
+                int index = i + (j * w);
 
                 pixel = glm::vec2(i, j);
 
                 bary = calculateBarycentricCoordinate(tri, pixel);
-                //fragmentBuffer[index].color = bary;
+
                 if (isBarycentricCoordInBounds(bary)) {
-                    float z = getZAtCoordinate(bary, tri);
-                    if (z < depth[index]) {
+                    int z = (-getZAtCoordinate(bary, tri)) * sDepth;
+
+                    
+                    // Loop-wait until this thread is able to execute its critical section.
+                    bool isSet;
+                    do {
+                        isSet = (atomicCAS(&mutex[index], 0, 1) == 0);
+                        if (isSet) {
+                            // Critical section goes here.
+                            // The critical section MUST be inside the wait loop;
+                            // if it is afterward, a deadlock will occur.
+                            if (z < depth[index]) {
+                                fragmentBuffer[index].color = glm::vec3(1, 1, 0);
+                                depth[index] = z;
+
+                                // Calculate normal
+                                fragmentBuffer[index].eyeNor = (bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor);
+                            }
+                        }
+                        if (isSet) {
+                            mutex[index] = 0;
+                        }
+                    } while (!isSet);
+                    
+
+                    /*
+                    int32_t old = atomicMin(intdepth[index], z);
+                    if (old > z) {
                         fragmentBuffer[index].color = glm::vec3(1, 1, 0);
-                        depth[index] = z;
+                        //depth[index] = z;
+
+                        // Calculate normal
+                        fragmentBuffer[index].eyeNor = (bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor);
                     }
+                    */
+                    
                 }
 
             }
@@ -778,10 +832,10 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	}
 	
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
-	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
+	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth, dev_intdepth);
 	
 	// TODO: rasterize
-    rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth);
+    rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth, mutex, screenDepth);
 
 
     // Copy depthbuffer colors into framebuffer
@@ -829,6 +883,11 @@ void rasterizeFree() {
 
 	cudaFree(dev_depth);
 	dev_depth = NULL;
+
+    cudaFree(mutex);
+    mutex = NULL;
+    cudaFree(dev_intdepth);
+    dev_intdepth = NULL;
 
     checkCUDAError("rasterize Free");
 }
