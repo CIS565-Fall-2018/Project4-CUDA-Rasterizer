@@ -137,25 +137,7 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
     }
 }
 
-/** 
-* Writes fragment colors to the framebuffer
-*/
-__global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) 
-{
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-    int index = x + (y * w);
 
-    if (x < w && y < h) 
-	{
-		
-		framebuffer[index] = fragmentBuffer[index].color;
-
-		// TODO: add your fragment shader code here
-
-    }
-}
 
 /**
  * Called once at the beginning of the program to allocate memory.
@@ -656,8 +638,8 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 		// Output of vertex shader
 		primitive.dev_verticesOut[vid].pos = screenPos;
 		
-		primitive.dev_verticesOut[vid].eyePos = eyePos - inPos;
-		primitive.dev_verticesOut[vid].eyeNor = inNormal;
+		primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));;
+		primitive.dev_verticesOut[vid].eyeNor = MV_normal * inNormal;
 	}
 }
 
@@ -740,7 +722,8 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 								if (currDepth < dev_depth[pixelIndex])
 								{
 									dev_fragmentBuffer[pixelIndex].eyeNor = (baryCoord.x * v1.eyeNor) + (baryCoord.y * v2.eyeNor) + (baryCoord.z * v3.eyeNor);
-									dev_fragmentBuffer[pixelIndex].color = dev_fragmentBuffer[pixelIndex].eyeNor;
+									dev_fragmentBuffer[pixelIndex].eyePos = (baryCoord.x * v1.eyePos) + (baryCoord.y * v2.eyePos) + (baryCoord.z * v3.eyePos);
+									dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.f, 0.f, 0.f);
 									dev_depth[pixelIndex] = currDepth;
 								}
 							}
@@ -757,12 +740,46 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 	}
 }
 
+#define MAT_LAMBERT
+//#define MAT_BLINN_PHONG
+
+#define BLINN_PHONEXP 64.f
+#define AMBIENT_LIGHT 0.2f
+
+/** 
+* Writes fragment colors to the framebuffer
+*/
 __global__
-void _fragmentShader()
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) 
 {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	int index = x + (y * w);
 
+	if (x < w && y < h) 
+	{
+		// Lamberts Material
+#ifdef MAT_LAMBERT
+
+		float lambertsTerm = glm::abs(glm::dot(fragmentBuffer[index].eyeNor, glm::vec3(0, 0, 1))) + AMBIENT_LIGHT;
+		lambertsTerm = glm::clamp(lambertsTerm, 0.f, 1.f);
+		framebuffer[index] = fragmentBuffer[index].color * lambertsTerm;
+#endif
+
+#ifdef MAT_BLINN_PHONG
+
+		const glm::vec3 fsNorm = fragmentBuffer[index].eyeNor;
+		const glm::vec3 fsCamera = glm::vec3(0, 0, 1.f);
+		const glm::vec3 hVec = (fsNorm + fsCamera) / 2.f;
+
+		const float specular = glm::max(glm::pow(glm::dot(glm::normalize(hVec), glm::normalize(fsNorm)), BLINN_PHONEXP), 0.f);
+		const float lambertsTerm = glm::clamp(glm::abs(glm::dot(fsNorm, fsCamera)) + AMBIENT_LIGHT, 0.f, 1.f);
+
+		framebuffer[index] = fragmentBuffer[index].color * (lambertsTerm + specular);
+#endif
+
+	}
 }
-
 /**
  * Perform rasterization.
  */
