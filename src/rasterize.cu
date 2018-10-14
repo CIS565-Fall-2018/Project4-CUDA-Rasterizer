@@ -137,7 +137,7 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
+void render(const int w, const int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
@@ -546,7 +546,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 							}
 						}
 
-						// TODO: write your code for other materails
+						// TODO: write your code for other materials
 						// You may have to take a look at tinygltfloader
 						// You can also use the above code loading diffuse material as a start point 
 					}
@@ -638,10 +638,20 @@ void _vertexTransformAndAssembly(
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
 		// Then divide the pos by its w element to transform into NDC space
 		// Finally transform x and y to viewport space
+		VertexOut& vertex = primitive.dev_verticesOut[vid];
+		VertexAttributePosition pos = primitive.dev_position[vid];
+		vertex.pos = MVP * glm::vec4(pos, 1);
+		vertex.pos /= vertex.pos.w * 2.0f;
+		vertex.pos += glm::vec4(0.5f);
+		vertex.pos *= glm::vec4(width, height, 1, 1);
 
 		// TODO: Apply vertex assembly here
-		// Assemble all attribute arraies into the primitive array
-		
+		// Assemble all attribute arrays into the primitive array
+		vertex.dev_diffuseTex = primitive.dev_diffuseTex;
+		vertex.texcoord0 = primitive.dev_texcoord0[vid];
+		vertex.eyeNor = glm::vec3(MV * glm::vec4(pos, 1));
+		vertex.eyePos = MV_normal * pos;
+
 	}
 }
 
@@ -657,28 +667,41 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 	if (iid < numIndices) {
 
-		// TODO: uncomment the following code for a start
-		// This is primitive assembly for triangles
-
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
-
+		// Primitive assembly for triangles
+		int pid; // id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 		// TODO: other primitive types (point, line)
 	}
-	
 }
 
+__global__
+void scanline(int width, int height, int numPrimitives, Primitive* primitives, Fragment* fragments) {
+	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
+	if (index < numPrimitives) {
+		Primitive& prim = primitives[index];
+		for (int x = 0; x < width; ++x) {
+			for (int y = 0; y < width; ++y) {
+				const glm::vec3 tri[] = { glm::vec3(prim.v[0].pos), glm::vec3(prim.v[1].pos), glm::vec3(prim.v[2].pos) };
+				glm::vec3 bary = calculateBarycentricCoordinate(tri, glm::vec2(x, y));
+				if (isBarycentricCoordInBounds(bary)) {
+					fragments[x + y * height].color = glm::vec3(1);
+					return;
+				}
+			}
+		}
+	}
+}
 
 /**
  * Perform rasterization.
  */
-void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) {
+void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm::mat3 MV_normal) {
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -688,10 +711,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	// (See README for rasterization pipeline outline.)
 
 	// Vertex Process & primitive assembly
+	curPrimitiveBeginId = 0;
+	dim3 numThreadsPerBlock(128);
 	{
-		curPrimitiveBeginId = 0;
-		dim3 numThreadsPerBlock(128);
-
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
 
@@ -702,14 +724,12 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
-				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height);
+				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >
+					(p->numVertices, *p, MVP, MV, MV_normal, width, height);
 				checkCUDAError("Vertex Processing");
 				cudaDeviceSynchronize();
 				_primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
-					(p->numIndices, 
-					curPrimitiveBeginId, 
-					dev_primitives, 
-					*p);
+					(p->numIndices, curPrimitiveBeginId, dev_primitives, *p);
 				checkCUDAError("Primitive Assembly");
 
 				curPrimitiveBeginId += p->numPrimitives;
@@ -723,8 +743,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// TODO: rasterize
-
-
+	dim3 numBlocksForPrimitives((curPrimitiveBeginId + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+	scanline << <numBlocksForPrimitives, numThreadsPerBlock >> >
+		(width, height, curPrimitiveBeginId, dev_primitives, dev_fragmentBuffer);
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
