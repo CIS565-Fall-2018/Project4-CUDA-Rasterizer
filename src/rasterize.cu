@@ -43,7 +43,7 @@ namespace {
 
 		 glm::vec3 eyePos;	// eye space position used for shading
 		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
-		// glm::vec3 col;
+		 glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
 		// int texWidth, texHeight;
@@ -83,6 +83,7 @@ namespace {
 		VertexAttributeTexcoord* dev_texcoord0;
 
 		// Materials, add more attributes when needed
+		glm::vec4 dev_materialColor;
 		TextureData* dev_diffuseTex;
 		int diffuseTexWidth;
 		int diffuseTexHeight;
@@ -523,6 +524,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 
 					// You can only worry about this part once you started to 
 					// implement textures for your rasterizer
+					glm::vec4 dev_materialColor = glm::vec4(0, 0, 0, 1);
 					TextureData* dev_diffuseTex = NULL;
 					int diffuseTexWidth = 0;
 					int diffuseTexHeight = 0;
@@ -532,6 +534,10 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 
 						if (mat.values.find("diffuse") != mat.values.end()) {
 							std::string diffuseTexName = mat.values.at("diffuse").string_value;
+							dev_materialColor = glm::vec4(mat.values.at("diffuse").number_array[0],
+														  mat.values.at("diffuse").number_array[1],
+														  mat.values.at("diffuse").number_array[2],
+														  mat.values.at("diffuse").number_array[3]);
 							if (scene.textures.find(diffuseTexName) != scene.textures.end()) {
 								const tinygltf::Texture &tex = scene.textures.at(diffuseTexName);
 								if (scene.images.find(tex.source) != scene.images.end()) {
@@ -582,6 +588,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 						dev_normal,
 						dev_texcoord0,
 
+						dev_materialColor,
 						dev_diffuseTex,
 						diffuseTexWidth,
 						diffuseTexHeight,
@@ -654,9 +661,11 @@ void _vertexTransformAndAssembly(
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-		primitive.dev_verticesOut[vid].pos = clipPos;
-		primitive.dev_verticesOut[vid].eyePos = eyeSpacePos;
-		primitive.dev_verticesOut[vid].eyeNor = eyeSpaceNorm;
+		VertexOut& vout = primitive.dev_verticesOut[vid];
+		vout.pos = clipPos;
+		vout.eyePos = eyeSpacePos;
+		vout.eyeNor = eyeSpaceNorm;
+		vout.col = glm::vec3(primitive.dev_materialColor);
 	}
 }
 
@@ -711,9 +720,9 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 				// if it is, store p's value into the pixel
 				if (isBarycentricCoordInBounds(baryCoor)) {
 					Fragment& frag = dev_fragmentBuffer[fidx];
-					frag.color = glm::vec3(1, 1, 1); // make everything white for now
-					frag.eyePos = p.v[0].eyePos;
-					frag.eyeNor = p.v[0].eyeNor;
+					frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
+					frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
+					frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
 				}
 			}
 		}
