@@ -28,6 +28,9 @@ namespace {
 
 	typedef unsigned char BufferByte;
 
+#define MAX_INSTANCES 10
+#define NUM_INSTANCES 3
+
 	enum PrimitiveType
 	{
 		Point = 1,
@@ -55,6 +58,7 @@ namespace {
 
 	struct Primitive 
 	{
+		int instanceId;
 		PrimitiveType primitiveType = Triangle;	// C++ 11 init
 		VertexOut v[3];
 	};
@@ -77,6 +81,10 @@ namespace {
 		int numPrimitives;
 		int numIndices;
 		int numVertices;
+		int numInstances;
+
+		int vertexOutStartIndex;
+
 
 		// Vertex In, const after loaded
 		VertexIndex* dev_indices;
@@ -113,7 +121,6 @@ static glm::vec3 *dev_framebuffer = NULL;
 
 static float * dev_depth = NULL;	// you might need this buffer when doing depth test
 static unsigned int* dev_mutex = NULL;
-
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -338,7 +345,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 			}
 		}
 
-
 		// parse through node to access mesh
 
 		auto itNode = nodeString2Matrix.begin();
@@ -441,6 +447,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 					auto it(primitive.attributes.begin());
 					auto itEnd(primitive.attributes.end());
 
+					int numInstances = NUM_INSTANCES;
 					int numVertices = 0;
 					// for each attribute
 					for (; it != itEnd; it++) {
@@ -505,7 +512,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 
 					// malloc for VertexOut
 					VertexOut* dev_vertexOut;
-					cudaMalloc(&dev_vertexOut, numVertices * sizeof(VertexOut));
+					cudaMalloc(&dev_vertexOut, numVertices * numInstances * sizeof(VertexOut));
 					checkCUDAError("Malloc VertexOut Buffer");
 
 					// ----------Materials-------------
@@ -565,6 +572,9 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 						numPrimitives,
 						numIndices,
 						numVertices,
+						numInstances,
+
+						0,
 
 						dev_indices,
 						dev_position,
@@ -578,7 +588,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 						dev_vertexOut	//VertexOut
 					});
 
-					totalNumPrimitives += numPrimitives;
+					totalNumPrimitives += (numPrimitives * numInstances);
 
 				} // for each primitive
 
@@ -621,6 +631,7 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 	// vertex id
 	const int vid = (blockIdx.x * blockDim.x) + threadIdx.x;
 	const int numVertices = primitive.numVertices;
+	const int numInstances = primitive.numInstances;
 
 	if (vid < numVertices) 
 	{
@@ -635,11 +646,15 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 		// Convert to screen Space
 		const glm::vec4 screenPos = NDCToScreenSpace(&outPos, width, height);
 
-		// Output of vertex shader
-		primitive.dev_verticesOut[vid].pos = screenPos;
-		
-		primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));;
-		primitive.dev_verticesOut[vid].eyeNor = MV_normal * inNormal;
+		// TODO : Change this
+		const glm::vec4 instanceOffset(100.f, 0.f, 0.f, 0.f);
+		for (int instanceId = 0; instanceId < numInstances; ++instanceId)
+		{
+			// Output of vertex shader
+			primitive.dev_verticesOut[vid * numInstances + instanceId].pos = screenPos + instanceOffset * float(instanceId);
+			primitive.dev_verticesOut[vid * numInstances + instanceId].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));;
+			primitive.dev_verticesOut[vid * numInstances + instanceId].eyeNor = MV_normal * inNormal;
+		}
 	}
 }
 
@@ -647,21 +662,26 @@ __global__
 void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_primitives, PrimitiveDevBufPointers primitive) {
 
 	// index id
-	int iid = (blockIdx.x * blockDim.x) + threadIdx.x;
+	const int iid = (blockIdx.x * blockDim.x) + threadIdx.x;
+	const int numInstances = primitive.numInstances;
 
 	if (iid < numIndices) {
 
-		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
+		
+		for (int instanceId = 0; instanceId < numInstances; ++instanceId)
+		{
+			int pid = iid / (int)primitive.primitiveType;;	// id for cur primitives vector
+			if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) 
+			{
+				const int indexPos = primitive.dev_indices[iid] * numInstances + instanceId;
+				
+				dev_primitives[(pid + curPrimitiveBeginId) * numInstances + instanceId].v[iid % (int)primitive.primitiveType] = primitive.dev_verticesOut[indexPos];
+				dev_primitives[(pid + curPrimitiveBeginId) * numInstances + instanceId].primitiveType = primitive.primitiveType;
+				dev_primitives[(pid + curPrimitiveBeginId) * numInstances + instanceId].instanceId = instanceId;
+			}
 
-		int pid;	// id for cur primitives vector
-		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-			pid = iid / (int)primitive.primitiveType;
-
-			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]	= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-			dev_primitives[pid + curPrimitiveBeginId].primitiveType = primitive.primitiveType;
 		}
-		// TODO: other primitive types (point, line)
 	}
 }
 
@@ -811,7 +831,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
 				// 1. Vertex Assembly and Shader
-				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(*p, MVP, MV, MV_normal, M_inverseTranspose, eyePos, width, height);
+				_vertexTransformAndAssembly <<< numBlocksForVertices, numThreadsPerBlock >> >(*p, MVP, MV, MV_normal, M_inverseTranspose, eyePos, width, height);
 				checkCUDAError("Vertex Processing");
 
 				cudaDeviceSynchronize();
@@ -824,7 +844,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 					*p);
 				checkCUDAError("Primitive Assembly");
 
-				curPrimitiveBeginId += p->numPrimitives;
+				curPrimitiveBeginId += (p->numPrimitives * p->numInstances);
 			}
 		}
 
