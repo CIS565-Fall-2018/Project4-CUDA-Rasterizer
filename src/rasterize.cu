@@ -62,8 +62,8 @@ namespace {
 		// The attributes listed below might be useful, 
 		// but always feel free to modify on your own
 
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;
 		// VertexAttributeTexcoord texcoord0;
 		// TextureData* dev_diffuseTex;
 		// ...
@@ -146,7 +146,10 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
         framebuffer[index] = fragmentBuffer[index].color;
 
 		// TODO: add your fragment shader code here
+		// compute diffuse color using Blinn or BlinnPhong
+		// store into fragment
 
+		// maybe do depth/stencil/scissor tests here too
     }
 }
 
@@ -636,12 +639,24 @@ void _vertexTransformAndAssembly(
 
 		// TODO: Apply vertex transformation here
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
+		glm::vec3 vertexPos = primitive.dev_position[vid];
+		glm::vec3 vertexNorm = primitive.dev_normal[vid];
+		glm::vec4 clipPos = MVP * glm::vec4(vertexPos, 1.0f);
 		// Then divide the pos by its w element to transform into NDC space
+		clipPos /= clipPos.w;
 		// Finally transform x and y to viewport space
+		clipPos.x = 0.5f * (float)width * (clipPos.x / clipPos.w + 1.0f);
+		clipPos.y = 0.5f * (float)height * (1.0f - clipPos.y / clipPos.w);
+
+		// eye space
+		glm::vec3 eyeSpacePos = glm::vec3(MV * glm::vec4(vertexPos, 1.0f));
+		glm::vec3 eyeSpaceNorm = glm::normalize(MV_normal * vertexNorm);
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-		
+		primitive.dev_verticesOut[vid].pos = clipPos;
+		primitive.dev_verticesOut[vid].eyePos = eyeSpacePos;
+		primitive.dev_verticesOut[vid].eyeNor = eyeSpaceNorm;
 	}
 }
 
@@ -660,12 +675,12 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
 
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
+		int pid;	// id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 
 		// TODO: other primitive types (point, line)
@@ -673,6 +688,39 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
+
+__global__ 
+void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer, int numPrimitives, int width, int height) {
+	int pidx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+	if (pidx < numPrimitives) {
+		const Primitive& p = dev_primitives[pidx];
+		glm::vec3 vertices[3];
+		vertices[0] = glm::vec3(p.v[0].pos);
+		vertices[1] = glm::vec3(p.v[1].pos);
+		vertices[2] = glm::vec3(p.v[2].pos);
+		AABB box = getAABBForTriangle(vertices);
+
+		// loop over all pixels to see if it's in p
+		for (int j = (int)box.min.y - 1; j < (int)box.max.y + 1; j++) {
+			for (int i = (int)box.max.x - 1; i < (int)box.max.x + 1; i++) {
+				int fidx = j * width + i;
+				glm::vec2 fragmentPos = glm::vec2(i + 0.5f, j + 0.5f);
+				glm::vec3 baryCoor = calculateBarycentricCoordinate(vertices, fragmentPos);
+
+				// if it is, store p's value into the pixel
+				if (isBarycentricCoordInBounds(baryCoor)) {
+					Fragment& frag = dev_fragmentBuffer[fidx];
+					frag.color = glm::vec3(1, 1, 1); // make everything white for now
+					frag.eyePos = p.v[0].eyePos;
+					frag.eyeNor = p.v[0].eyeNor;
+				}
+			}
+		}
+
+		
+	}
+}
 
 
 /**
@@ -723,7 +771,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// TODO: rasterize
-
+	dim3 numThreadsPerBlock(128);
+	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+	rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, totalNumPrimitives, width, height);
 
 
     // Copy depthbuffer colors into framebuffer
