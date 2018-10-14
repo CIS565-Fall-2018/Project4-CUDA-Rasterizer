@@ -98,11 +98,18 @@ namespace {
 
 }
 
-static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
+#define SSAA 0
+#define SSAA_FACTOR 2
+#define TEXTURE 0
 
+#define DEBUG_Z 0
+#define DEBUG_NORM 0
+
+static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
 static int width = 0;
 static int height = 0;
+
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
@@ -118,21 +125,52 @@ static int * dev_mutex = NULL;
  */
 __global__ 
 void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-    int index = x + (y * w);
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+#if SSAA
+	int orgWidth = w / SSAA_FACTOR;
+	int orgHeight = h / SSAA_FACTOR;
+	int index = x + (y * orgWidth);
 
-    if (x < w && y < h) {
-        glm::vec3 color;
-        color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-        color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-        color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
-        // Each thread writes one pixel location in the texture (textel)
-        pbo[index].w = 0;
-        pbo[index].x = color.x;
-        pbo[index].y = color.y;
-        pbo[index].z = color.z;
-    }
+	if (x < orgWidth && y < orgHeight) {
+		glm::vec3 color;
+
+		// find other fragments within the same SSAA_FACTOR by SSAA_FACTOR grid
+		for (int offX = 0; offX < SSAA_FACTOR; offX++) {
+			for (int offY = 0; offY < SSAA_FACTOR; offY++) {
+				int xCoord = offX + x * SSAA_FACTOR;
+				int yCoord = (offY + y * SSAA_FACTOR) * w;
+				int sampleIdx = xCoord + yCoord;
+				// super sample over all frags within the same grid cell
+				color.x += glm::clamp(image[sampleIdx].x, 0.0f, 1.0f) * 255.0;
+				color.y += glm::clamp(image[sampleIdx].y, 0.0f, 1.0f) * 255.0;
+				color.z += glm::clamp(image[sampleIdx].z, 0.0f, 1.0f) * 255.0;
+			}
+		}
+
+		// downsample by averaging out
+		color /= SSAA_FACTOR * SSAA_FACTOR;
+		pbo[index].w = 0;
+		pbo[index].x = color.x;
+		pbo[index].y = color.y;
+		pbo[index].z = color.z;
+	}
+#else
+	int index = x + (y * w);
+
+	if (x < w && y < h) {
+		glm::vec3 color;
+		color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
+		color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
+		color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+
+		// Each thread writes one pixel location in the texture (textel)
+		pbo[index].w = 0;
+		pbo[index].x = color.x;
+		pbo[index].y = color.y;
+		pbo[index].z = color.z;
+	}
+#endif   
 }
 
 /** 
@@ -144,13 +182,18 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
-    if (x < w && y < h) {
+	if (x < w && y < h) {
+
 		Fragment f = fragmentBuffer[index];
-		glm::vec3 lightDir(1.f, 0.5f, 1.f);
-		float lambert = glm::dot(-lightDir, f.eyeNor);
+#if !DEBUG_Z && !DEBUG_NORM
+		glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.2f, 0.7f) - f.eyePos);
+		float lambert = glm::dot(lightDir, f.eyeNor);
 		lambert += 0.1f; // ambient light
 		framebuffer[index] = f.color * lambert;
-    }
+#else
+		framebuffer[index] = f.color;
+#endif
+	}
 }
 
 /**
@@ -159,12 +202,19 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 void rasterizeInit(int w, int h) {
     width = w;
     height = h;
+
+#if SSAA
+	width *= SSAA_FACTOR;
+	height *= SSAA_FACTOR;
+#endif
+
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
     cudaFree(dev_framebuffer);
-    cudaMalloc(&dev_framebuffer,   width * height * sizeof(glm::vec3));
-    cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
+
+	cudaMalloc(&dev_framebuffer, width * height * sizeof(glm::vec3));
+	cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(int));
@@ -649,6 +699,8 @@ void _vertexTransformAndAssembly(
 		vPos /= vPos.w;
 		vPos.x = 0.5f * (float)width * (vPos.x + 1.0f);
 		vPos.y = 0.5f * (float)height * (1.0f - vPos.y);
+		vPos.z = -vPos.z;
+
 		primitive.dev_verticesOut[index].pos = vPos;
 
 		glm::vec3 vNor = glm::vec3(primitive.dev_normal == NULL ? glm::vec3(1.f) : primitive.dev_normal[index]);
@@ -659,7 +711,8 @@ void _vertexTransformAndAssembly(
 		primitive.dev_verticesOut[index].dev_diffuseTex = primitive.dev_diffuseTex;
 		primitive.dev_verticesOut[index].texHeight = primitive.diffuseTexHeight;
 		primitive.dev_verticesOut[index].texWidth = primitive.diffuseTexWidth;
-		primitive.dev_verticesOut[index].col = glm::vec3(1.0f, 0.f, 0.f);
+
+		primitive.dev_verticesOut[index].col = glm::vec3(0.5f, 0.f, 0.f);
 	}
 }
 
@@ -717,7 +770,8 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 			if (isBarycentricCoordInBounds(baryCoords)) {
 				// fragment within triangle
 				int pixelIdx = col + (row * width);
-				int newDepth = INT_MAX * getZAtCoordinate(baryCoords, tri);
+				float baryDepth = getZAtCoordinate(baryCoords, tri);
+				int newDepth = INT_MAX * baryDepth;
 
 				bool isSet;
 				do {
@@ -726,8 +780,27 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 						if (newDepth < dev_depth[pixelIdx]) {
 							dev_depth[pixelIdx] = newDepth;
 							Fragment f;
-							f.color = p.v[0].col;
-							f.eyeNor = p.v[0].eyeNor;
+							f.eyeNor = glm::normalize(p.v[0].eyeNor * baryCoords.x +
+									   p.v[1].eyeNor * baryCoords.y + 
+									   p.v[2].eyeNor * baryCoords.z);
+
+							f.eyePos = glm::normalize(p.v[0].eyePos * baryCoords.x +
+								p.v[1].eyePos * baryCoords.y +
+								p.v[2].eyePos * baryCoords.z);
+				
+#if DEBUG_Z
+							f.color = glm::abs(glm::vec3(1.f - baryDepth));
+#elif DEBUG_NORM
+							f.color = f.eyeNor;
+#elif TEXTURE
+							// do something with tex
+
+#else
+							// lambert will be used on the interpolated color
+							f.color = glm::normalize(p.v[0].col * baryCoords.x +
+								p.v[1].col * baryCoords.y +
+								p.v[2].col * baryCoords.z);
+#endif
 							dev_fragmentBuffer[pixelIdx] = f;
 						}
 					}
@@ -807,8 +880,14 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
+
+#if SSAA
+	 blockCount2d = dim3((width / SSAA_FACTOR - 1) / blockSize2d.x + 1,
+		(height / SSAA_FACTOR - 1) / blockSize2d.y + 1);
+#endif
+
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+	sendImageToPBO << <blockCount2d, blockSize2d >> >(pbo, width, height, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
 }
 
