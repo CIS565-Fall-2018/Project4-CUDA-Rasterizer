@@ -45,6 +45,7 @@ namespace {
 
 		 glm::vec3 eyePos;	// eye space position used for shading
 		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
+
 		// glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
@@ -58,22 +59,20 @@ namespace {
 		VertexOut v[3];
 	};
 
-	struct Fragment {
+	struct Fragment 
+	{
 		glm::vec3 color;
-
-		// TODO: add new attributes to your Fragment
-		// The attributes listed below might be useful, 
-		// but always feel free to modify on your own
-
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
+		glm::vec3 eyePos;
+		glm::vec3 eyeNor;
 		// VertexAttributeTexcoord texcoord0;
 		// TextureData* dev_diffuseTex;
 		// ...
 	};
 
-	struct PrimitiveDevBufPointers {
+	struct PrimitiveDevBufPointers 
+	{
 		int primitiveMode;	//from tinygltfloader macro
+		
 		PrimitiveType primitiveType;
 		int numPrimitives;
 		int numIndices;
@@ -142,12 +141,15 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) 
+{
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
-    if (x < w && y < h) {
+    if (x < w && y < h) 
+	{
+		
 		framebuffer[index] = fragmentBuffer[index].color;
 
 		// TODO: add your fragment shader code here
@@ -173,9 +175,8 @@ void rasterizeInit(int w, int h) {
 	cudaMalloc(&dev_depth, width * height * sizeof(float));
 
 	cudaFree(dev_mutex);
-	cudaMalloc((void **)&dev_mutex, sizeof(unsigned int));
-	cudaMemset(dev_mutex, 0, sizeof(unsigned int));
-
+	cudaMalloc(&dev_mutex,   width * height * sizeof(unsigned int));
+	cudaMemset(dev_mutex, 0, width * height * sizeof(unsigned int));
 
 	checkCUDAError("rasterizeInit");
 }
@@ -243,45 +244,6 @@ void _nodeMatrixTransform(
 		position[vid] = glm::vec3(MV * glm::vec4(position[vid], 1.0f));
 		normal[vid] = glm::normalize(MV_normal * normal[vid]);
 	}
-}
-
-__device__ __host__
-glm::vec4 NDCToScreenSpace(glm::vec4* v, int width, int height)
-{
-	glm::vec4 screenCoords(0.f, 0.f, 0.f, 1.f);
-	screenCoords[0] = ((*v)[0] + 1.f) * width / 2.f;
-	screenCoords[1] = (1.f - (*v)[1]) * height / 2.f;
-	return screenCoords;
-}
-
-__device__ __host__
-glm::vec4 GetTriangleBounds(glm::vec4* v1, glm::vec4* v2, glm::vec4* v3, int width, int height)
-{
-	glm::vec4 bounds(0.f, 0.f, 0.f, 1.f);
-
-	const float minX = glm::min(glm::min((*v1)[0], (*v2)[0]), (*v3)[0]);
-	const float maxX = glm::max(glm::max((*v1)[0], (*v2)[0]), (*v3)[0]);
-	
-	const float minY = glm::min(glm::min((*v1)[1], (*v2)[1]), (*v3)[1]);
-	const float maxY = glm::max(glm::max((*v1)[1], (*v2)[1]), (*v3)[1]);
-
-	bounds[0] = glm::clamp(minX, 0.f, float(width));
-	bounds[1] = glm::clamp(minY, 0.f, float(height));
-	bounds[2] = glm::clamp(maxX, 0.f, float(width));
-	bounds[3] = glm::clamp(maxY, 0.f, float(height));
-
-	return bounds;
-}
-
-__host__ __device__
-glm::vec3 GetBaryCentric(const glm::vec3* currentPoint, const glm::vec3* p1, const glm::vec3* p2, const glm::vec3* p3)
-{
-	const glm::vec3 s1 = glm::cross(((*currentPoint) - (*p2)), ((*p3) - (*p2)));
-	const glm::vec3 s2 = glm::cross(((*currentPoint) - (*p1)), ((*p2) - (*p1)));
-	const glm::vec3 s3 = glm::cross(((*currentPoint) - (*p3)), ((*p1) - (*p3)));
-	const float area = glm::length(glm::cross(((*p1) - (*p2)) , ((*p3) - (*p2))));
-	const glm::vec3 influence = glm::vec3(0.f);// glm::vec3(glm::length(s1) / area, glm::length(s2) / area, glm::length(s3) / area);
-	return influence;
 }
 
 glm::mat4 getMatrixFromNodeMatrixVector(const tinygltf::Node & n) {
@@ -674,36 +636,29 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 static int curPrimitiveBeginId = 0;
 
 __global__ 
-void _vertexTransformAndAssembly(
-	PrimitiveDevBufPointers primitive, 
-	glm::mat4 MVP, glm::mat4 MV, glm::mat3 MV_normal, 
-	int width, int height) {
-
+void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MVP, glm::mat4 MV, glm::mat3 MV_normal, int width, int height) 
+{
 	// vertex id
-	int vid = (blockIdx.x * blockDim.x) + threadIdx.x;
+	const int vid = (blockIdx.x * blockDim.x) + threadIdx.x;
 	const int numVertices = primitive.numVertices;
 
-	if (vid < numVertices) {
+	if (vid < numVertices) 
+	{
+		// Attributes
+		const glm::vec3 inPos = primitive.dev_position[vid];
+		const glm::vec3 inNormal = primitive.dev_normal[vid];
 
-		// TODO: Apply vertex transformation here
-		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
-		// Then divide the pos by its w element to transform into NDC space
-		// Finally transform x and y to viewport space
+		// This is in NDC Space
+		glm::vec4 outPos = MVP * glm::vec4(inPos, 1.f);
+		outPos /= outPos.w;
 
-		for (int i = 0; i < numVertices; ++i)
-		{
-			const VertexAttributePosition inPos = primitive.dev_position[i];
-			
-			// This is in NDC Space
-			glm::vec4 outPos = MVP * glm::vec4(inPos, 1.0f);
+		// Convert to screen Space
+		const glm::vec4 screenPos = NDCToScreenSpace(&outPos, width, height);
 
-			// Convert to screen Space
-			primitive.dev_verticesOut[i].pos = NDCToScreenSpace(&outPos, width, height);
-		}
-
-		// TODO: Apply vertex assembly here
-		// Assemble all attribute arraies into the primitive array
-		
+		// Output of vertex shader
+		primitive.dev_verticesOut[vid].pos = screenPos;
+		primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));
+		primitive.dev_verticesOut[vid].eyeNor = MV_normal * inNormal;
 	}
 }
 
@@ -729,15 +684,16 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	}
 }
 
-
 __global__
-void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth, unsigned int* mutexLock)
+void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth, unsigned int* mutexLock) 
 {
-	const int primitiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
+	const int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	const int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	const int primitiveId = x + (y * width);
 
 	if (primitiveId < totalNumPrimitives)
 	{
-		Primitive& primitive = dev_primitives[primitiveId];
+		Primitive primitive = dev_primitives[primitiveId];
 
 		if (primitive.primitiveType == Triangle) 
 		{
@@ -753,13 +709,19 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 
 			const AABB bounds = getAABBForTriangle(triangle);
 
-			for (int row = bounds.min[1]; row < bounds.max[1]; ++row)
+			// Clamp TO Screen
+			float minX = glm::clamp(bounds.min[0], 0.f, width - 1.f);
+			float maxX = glm::clamp(bounds.max[0], 0.f, width - 1.f);
+			float minY = glm::clamp(bounds.min[1], 0.f, height - 1.f);
+			float maxY = glm::clamp(bounds.max[1], 0.f, height - 1.f);
+
+			for (int row = minY; row <= maxY; ++row)
 			{
-				for (int col = bounds.min[0]; col < bounds.max[0]; ++col)
+				for (int col = minX; col <= maxX; ++col)
 				{
 					const int pixelIndex = col + row * width;
 					const glm::vec2 currPos(col, row);
-					
+
 					// Calculate BaryCentric coordinates
 					const glm::vec3 baryCoord = calculateBarycentricCoordinate(triangle, currPos);
 
@@ -769,28 +731,26 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 					if (isInside)
 					{
 						// Get the interop depth
-						const float currDepth = getZAtCoordinate(baryCoord, triangle);
+						const float currDepth = -getZAtCoordinate(baryCoord, triangle);
 
 						bool isSet;
 						do {
 							isSet = (atomicCAS(mutexLock, 0, 1) == 0);
-							if (isSet) {
-
+							if (isSet) 
+							{
 								if (currDepth < dev_depth[pixelIndex])
 								{
-									// Update frame buffer and depth buffer
-									dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.0f, 1.0f, 1.0f);
+									dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.f);
+									dev_fragmentBuffer[pixelIndex].eyeNor = (baryCoord.x * v1.eyeNor) + (baryCoord.y * v2.eyeNor) + (baryCoord.z * v3.eyeNor);
 									dev_depth[pixelIndex] = currDepth;
 								}
 							}
-							if (isSet) {
+							if (isSet) 
+							{
 								*mutexLock = 0;
 							}
 						} while (!isSet);
 
-
-
-						
 					}
 				}
 			}
@@ -824,10 +784,13 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
 
-		for (; it != itEnd; ++it) {
-			auto p = (it->second).begin();	// each primitive
+		for (; it != itEnd; ++it) 
+		{
+			auto p = (it->second).begin();	
 			auto pEnd = (it->second).end();
-			for (; p != pEnd; ++p) {
+
+			for (; p != pEnd; ++p) 
+			{
 				dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
@@ -858,17 +821,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// 4. Rasterize - Call per primitive
-	{
-		dim3 numThreadsPerBlock(128);
-		dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
-
-		cudaMemset(dev_mutex, 0, sizeof(unsigned int));
-
-		_rasterizePrimitive << <numBlocksForPrimitives, numThreadsPerBlock >> > (width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex);
-		checkCUDAError("Rasterizer");
-	}
-
-	// 5. Fragment Shader - call per primitive
+	_rasterizePrimitive << <blockCount2d, blockSize2d >> > (width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex);
+	checkCUDAError("Rasterizer");
 
     // Copy fragmentBuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);

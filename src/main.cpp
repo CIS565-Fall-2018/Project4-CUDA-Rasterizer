@@ -119,9 +119,9 @@ void runCuda() {
 	glm::mat4 MV = V * M;
 	glm::mat4 MVP = P * MV;
 
-    cudaGLMapBufferObject((void **)&dptr, pbo);
+	cudaGLMapBufferObject((void **)&dptr, pbo);
 	rasterize(dptr, MVP, MV, MV_normal);
-    cudaGLUnmapBufferObject(pbo);
+	cudaGLUnmapBufferObject(pbo);
 
     frame++;
     fpstracker++;

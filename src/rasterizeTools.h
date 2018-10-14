@@ -25,12 +25,22 @@ glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
     return glm::vec3(m * v);
 }
 
+__host__ __device__ static
+glm::vec4 NDCToScreenSpace(const glm::vec4* v, int width, int height)
+{
+	glm::vec4 screenCoords(0.f, 0.f, 0.f, 1.f);
+	screenCoords[0] = ((*v)[0] + 1.f) * width / 2.f;
+	screenCoords[1] = (1.f - (*v)[1]) * height / 2.f;
+	screenCoords[2] = ((*v)[2] + 1.f) / 2.f;;
+	return screenCoords;
+}
+
 // CHECKITOUT
 /**
  * Finds the axis aligned bounding box for a given triangle.
  */
 __host__ __device__ static
-AABB getAABBForTriangle(const glm::vec3* tri) {
+AABB getAABBForTriangle(const glm::vec3 tri[3]) {
     AABB aabb;
     aabb.min = glm::vec3(
             glm::min(glm::min(tri[0].x, tri[1].x), tri[2].x),
@@ -48,7 +58,7 @@ AABB getAABBForTriangle(const glm::vec3* tri) {
  * Calculate the signed area of a given triangle.
  */
 __host__ __device__ static
-float calculateSignedArea(const glm::vec3* tri) {
+float calculateSignedArea(const glm::vec3 tri[3]) {
     return 0.5 * ((tri[2].x - tri[0].x) * (tri[1].y - tri[0].y) - (tri[1].x - tri[0].x) * (tri[2].y - tri[0].y));
 }
 
@@ -70,7 +80,7 @@ float calculateBarycentricCoordinateValue(glm::vec2 a, glm::vec2 b, glm::vec2 c,
  * Calculate barycentric coordinates.
  */
 __host__ __device__ static
-glm::vec3 calculateBarycentricCoordinate(const glm::vec3* tri, glm::vec2 point) {
+glm::vec3 calculateBarycentricCoordinate(const glm::vec3 tri[3], glm::vec2 point) {
     float beta  = calculateBarycentricCoordinateValue(glm::vec2(tri[0].x, tri[0].y), point, glm::vec2(tri[2].x, tri[2].y), tri);
     float gamma = calculateBarycentricCoordinateValue(glm::vec2(tri[0].x, tri[0].y), glm::vec2(tri[1].x, tri[1].y), point, tri);
     float alpha = 1.0 - beta - gamma;
@@ -94,7 +104,7 @@ bool isBarycentricCoordInBounds(const glm::vec3 barycentricCoord) {
  * (i.e. depth) on the triangle.
  */
 __host__ __device__ static
-float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3* tri) {
+float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3]) {
     return -(barycentricCoord.x * tri[0].z
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
