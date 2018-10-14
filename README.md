@@ -30,31 +30,31 @@ A list of features implemented in this project is as follows:
 **Render depth and normals**
 | depth | normal |
 |------|------|
-| ![](renders/depth.png) |![](renders/normals.png) |
+| ![](renders/depth.png) | ![](renders/normals.png) |
 
 **Texture mapping and lambert shading**
 | plain color | lambert shading |
 |------|------|
-| ![](renders/duck_plain.png) |![](renders/duck_lambert.png) |
+| ![](renders/duck_plain.png) | ![](renders/duck_lambert.png) |
 
 | plain color | lambert shading |
 |------|------|
-| ![](renders/truck_plain.png) |![](renders/truck_lambert.png) |
+| ![](renders/truck_plain.png) | ![](renders/truck_lambert.png) |
 
 **Render texture w/o bilinear texture filtering**
 | no bilinear filtering | with bilinear filtering |
 |------|------|
-| ![](renders/no_bilinear.png) |![](renders/bilinear.png) |
+| ![](renders/no_bilinear.png) | ![](renders/bilinear.png) |
 
 **Back face culling**
 | render front face | render back face |
 |------|------|
-| ![](renders/frontface.png) |![](renders/backface.png) |
+| ![](renders/frontface.png) | ![](renders/backface.png) |
 
 **Render points and lines**
 | render points | render lines |
 |------|------|
-| ![](renders/points.png) |![](renders/lines.png) |
+| ![](renders/points.png) | ![](renders/lines.png) |
 
 ## Performance Analysis and Questions ##
 ![](renders/time.png)
