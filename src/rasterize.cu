@@ -110,7 +110,7 @@ static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
-static int * dev_depth = NULL;	// you might need this buffer when doing depth test
+static float * dev_depth = NULL;	// you might need this buffer when doing depth test
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -168,13 +168,13 @@ void rasterizeInit(int w, int h) {
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
-	cudaMalloc(&dev_depth, width * height * sizeof(int));
+	cudaMalloc(&dev_depth, width * height * sizeof(float));
 
 	checkCUDAError("rasterizeInit");
 }
 
 __global__
-void initDepth(int w, int h, int * depth)
+void initDepth(int w, int h, float * depth)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -182,7 +182,7 @@ void initDepth(int w, int h, int * depth)
 	if (x < w && y < h)
 	{
 		int index = x + (y * w);
-		depth[index] = INT_MAX;
+		depth[index] = 999999.0f; // TODO: fix this magic number
 	}
 }
 
@@ -699,7 +699,7 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 
 __global__ 
-void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer, int numPrimitives, int width, int height) {
+void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth, int numPrimitives, int width, int height) {
 	int pidx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if (pidx < numPrimitives) {
@@ -716,13 +716,18 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 				int fidx = j * width + i;
 				glm::vec2 fragmentPos = glm::vec2(i + 0.5, j + 0.5f);
 				glm::vec3 baryCoor = calculateBarycentricCoordinate(vertices, fragmentPos);
+				float depth = getZAtCoordinate(baryCoor, vertices);
 
 				// if it is, store p's value into the pixel
 				if (isBarycentricCoordInBounds(baryCoor)) {
-					Fragment& frag = dev_fragmentBuffer[fidx];
-					frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
-					frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
-					frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
+					// check for depth
+					if (depth < dev_depth[fidx]) {
+						dev_depth[fidx] = depth;
+						Fragment& frag = dev_fragmentBuffer[fidx];
+						frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
+						frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
+						frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
+					}
 				}
 			}
 		}
@@ -782,7 +787,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	// TODO: rasterize
 	dim3 numThreadsPerBlock(128);
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
-	rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, totalNumPrimitives, width, height);
+	rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, dev_depth, totalNumPrimitives, width, height);
 
 
     // Copy depthbuffer colors into framebuffer
