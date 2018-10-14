@@ -18,6 +18,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define BILINEAR 0
+
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -43,7 +45,7 @@ namespace {
 
 		 glm::vec3 eyePos;	// eye space position used for shading
 		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
-		// glm::vec3 col;
+		 glm::vec3 color;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
 		int texWidth, texHeight;
@@ -174,7 +176,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, cons
 
         float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, light), 0.f, 1.f);
 
-        framebuffer[index] = fragmentBuffer[index].color * lambert;
+        //framebuffer[index] = fragmentBuffer[index].color * lambert;
+        framebuffer[index] = fragmentBuffer[index].color + 0.15f;
     }
 }
 
@@ -687,20 +690,24 @@ void _vertexTransformAndAssembly(
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-        VertexOut vo;
-        vo.pos = projected; // glm::vec4(primitive.dev_position[vid], 1);
-        vo.eyePos = glm::vec3(MV * glm::vec4(pos, 1));
-        vo.eyeNor = MV_normal * primitive.dev_normal[vid];
 
-        if (primitive.dev_diffuseTex) {
-            vo.texcoord0 = primitive.dev_texcoord0[vid];
-            vo.dev_diffuseTex = primitive.dev_diffuseTex;
-            vo.texWidth = primitive.diffuseTexWidth;
-            vo.texHeight = primitive.diffuseTexHeight;
+        primitive.dev_verticesOut[vid].pos = projected;
+        primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(pos, 1));
+        primitive.dev_verticesOut[vid].eyeNor = glm::normalize(MV_normal * primitive.dev_normal[vid]);
+
+        if (primitive.dev_diffuseTex != NULL) {
+            primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
+            primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
+            primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
+            primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
         }
-        //vo.texcoord0 = primitive.dev_texcoord0[vid];
+        else {
+            primitive.dev_verticesOut[vid].dev_diffuseTex = NULL;
+            thrust::default_random_engine rng = thrust::default_random_engine(utilhash(vid + 11));
+            thrust::uniform_real_distribution<float> u01(0, 1);
+            primitive.dev_verticesOut[vid].color = glm::vec3(u01(rng), u01(rng), u01(rng));
+        }
 
-        primitive.dev_verticesOut[vid] = vo;
 	}
 }
 
@@ -758,20 +765,19 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
         aabb.max.x = glm::max(0.f, glm::min((float) w - 1, aabb.max.x));
         aabb.max.y = glm::max(0.f, glm::min((float) h - 1, aabb.max.y));
 
+        int index, weird_z;
         for (int j = aabb.min.y; j <= aabb.max.y; j++) {
             for (int i = aabb.min.x; i <= aabb.max.x; i++) {
-                int index = i + (j * w);
-
+                index = i + (j * w);
                 pixel = glm::vec2(i, j);
 
                 bary = calculateBarycentricCoordinate(tri, pixel);
 
                 if (isBarycentricCoordInBounds(bary)) {
-                    //int z = (-getZAtCoordinate(bary, tri)) * sDepth;
-                    float z = perspectiveCorrectZ(tri, bary);
-                    int weird_z = z * sDepth;
 
-                    
+                    // Weird z. Weird because it's an int
+                    weird_z = getZAtCoordinate(bary, tri) * sDepth;
+
                     // Loop-wait until this thread is able to execute its critical section.
                     bool isSet;
                     do {
@@ -784,8 +790,19 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                                 
                                 depth[index] = weird_z;
 
+                                // Perspective correct z
+                                glm::vec3 eyeTri[3];
+                                eyeTri[0] = glm::vec3(p.v[0].eyePos);
+                                eyeTri[1] = glm::vec3(p.v[1].eyePos);
+                                eyeTri[2] = glm::vec3(p.v[2].eyePos);
+                                float z = perspectiveCorrectZ(eyeTri, bary);
+
                                 // Calculate normal
-                                fragmentBuffer[index].eyeNor = glm::normalize((bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor));
+                                glm::vec3 normals[3];
+                                normals[0] = p.v[0].eyeNor;
+                                normals[1] = p.v[1].eyeNor;
+                                normals[2] = p.v[2].eyeNor;
+                                fragmentBuffer[index].eyeNor = glm::normalize(perspectiveCorrectInterpolation(eyeTri, z, normals, bary));
 
                                 // Calculate perspective correct UV coordinates
                                 if (p.v[0].dev_diffuseTex) {
@@ -794,18 +811,57 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                                     uv[1] = glm::vec3(p.v[1].texcoord0, 0);
                                     uv[2] = glm::vec3(p.v[2].texcoord0, 0);
 
-                                    glm::vec3 final_uv = perspectiveCorrectInterpolation(tri, z, uv, bary);
+                                    glm::vec3 final_uv = perspectiveCorrectInterpolation(eyeTri, z, uv, bary);
 
-                                    int u = final_uv.x * p.v[0].texWidth;
-                                    int v = final_uv.y * p.v[0].texHeight;
+                                    float u = final_uv.x * p.v[0].texWidth;
+                                    float v = final_uv.y * p.v[0].texHeight;
 
-                                    fragmentBuffer[index].color.r = p.v[0].dev_diffuseTex[(u + (v * p.v[0].texWidth)) * 3];
-                                    fragmentBuffer[index].color.g = p.v[0].dev_diffuseTex[((u + (v * p.v[0].texWidth)) * 3) + 1];
-                                    fragmentBuffer[index].color.b = p.v[0].dev_diffuseTex[((u + (v * p.v[0].texWidth)) * 3) + 2];
+                                    int u_i = glm::floor(u);
+                                    int v_i = glm::floor(v);
+
+                                    TextureData* tex = p.v[0].dev_diffuseTex;
+
+#if BILINEAR
+
+                                    float u_fract = u - glm::floor(u);
+                                    float v_fract = v - glm::floor(v);
+
+                                    glm::vec3 col_00 = glm::vec3(tex[(u_i + (v_i * p.v[0].texWidth)) * 3], 
+                                                                 tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 1],
+                                                                 tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 2]);
+                                    glm::vec3 col_10 = glm::vec3(tex[(u_i + 1 + (v_i * p.v[0].texWidth)) * 3],
+                                                                 tex[((u_i + 1 + (v_i * p.v[0].texWidth)) * 3) + 1],
+                                                                 tex[((u_i + 1 + (v_i * p.v[0].texWidth)) * 3) + 2]);
+                                    glm::vec3 col_01 = glm::vec3(tex[(u_i + ((v_i + 1) * p.v[0].texWidth)) * 3],
+                                                                 tex[((u_i + ((v_i + 1) * p.v[0].texWidth)) * 3) + 1],
+                                                                 tex[((u_i + ((v_i + 1) * p.v[0].texWidth)) * 3) + 2]);
+                                    glm::vec3 col_11 = glm::vec3(tex[(u_i + 1 + ((v_i + 1) * p.v[0].texWidth)) * 3],
+                                                                 tex[((u_i + 1 + ((v_i + 1) * p.v[0].texWidth)) * 3) + 1],
+                                                                 tex[((u_i + 1 + ((v_i + 1) * p.v[0].texWidth)) * 3) + 2]);
+
+                                    glm::vec3 col_interp1 = glm::mix(col_00, col_10, u_fract);
+                                    glm::vec3 col_interp2 = glm::mix(col_01, col_11, u_fract);
+
+                                    glm::vec3 final_col = glm::mix(col_interp1, col_interp2, v_fract);
+#else
+                                    glm::vec3 final_col = glm::vec3(tex[(u_i + (v_i * p.v[0].texWidth)) * 3],
+                                                                    tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 1],
+                                                                    tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 2]);
+#endif
+                                
+
+                                    fragmentBuffer[index].color = final_col;
 
                                 }
                                 else {
-                                    fragmentBuffer[index].color = glm::vec3(1, 1, 0);
+                                    glm::vec3 colors[3];
+                                    colors[0] = p.v[0].color;
+                                    colors[1] = p.v[1].color;
+                                    colors[2] = p.v[2].color;
+
+                                    glm::vec3 final_color = perspectiveCorrectInterpolation(eyeTri, z, colors, bary);
+
+                                    fragmentBuffer[index].color = final_color;
                                 }
                             }
                         }
@@ -813,18 +869,6 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                             mutex[index] = 0;
                         }
                     } while (!isSet);
-                    
-
-                    /*
-                    int32_t old = atomicMin(intdepth[index], z);
-                    if (old > z) {
-                        fragmentBuffer[index].color = glm::vec3(1, 1, 0);
-                        //depth[index] = z;
-
-                        // Calculate normal
-                        fragmentBuffer[index].eyeNor = (bary.x * p.v[0].eyeNor) + (bary.y * p.v[1].eyeNor) + (bary.z * p.v[2].eyeNor);
-                    }
-                    */
                     
                 }
 
