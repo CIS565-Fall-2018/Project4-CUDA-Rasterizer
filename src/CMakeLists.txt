@@ -1,4 +1,6 @@
 set(SOURCE_FILES
+	"CameraControls.h"
+	"CameraControls.cpp"
     "rasterize.cu"
     "rasterize.h"
     "rasterizeTools.h"

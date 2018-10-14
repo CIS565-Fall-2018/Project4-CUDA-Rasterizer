@@ -116,11 +116,15 @@ void runCuda() {
 		* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f));
 
 	glm::mat3 MV_normal = glm::transpose(glm::inverse(glm::mat3(V) * glm::mat3(M)));
+	glm::mat3 M_inverseTranspose = glm::inverse(glm::transpose(glm::mat3(M)));
 	glm::mat4 MV = V * M;
 	glm::mat4 MVP = P * MV;
 
+
+	glm::vec3 eyePos = glm::vec3(x_trans, y_trans, z_trans);
+
 	cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal);
+	rasterize(dptr, MVP, MV, MV_normal, M_inverseTranspose, eyePos);
 	cudaGLUnmapBufferObject(pbo);
 
     frame++;

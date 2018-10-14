@@ -339,8 +339,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 		}
 	}
 
-
-
 	// 2. for each mesh: 
 	//		for each primitive: 
 	//			build device buffer of indices, materail, and each attributes
@@ -636,7 +634,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 static int curPrimitiveBeginId = 0;
 
 __global__ 
-void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MVP, glm::mat4 MV, glm::mat3 MV_normal, int width, int height) 
+void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MVP, glm::mat4 MV, glm::mat3 MV_normal, glm::mat3 M_InverseTranspose, glm::vec3 eyePos, int width, int height) 
 {
 	// vertex id
 	const int vid = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -657,8 +655,9 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 
 		// Output of vertex shader
 		primitive.dev_verticesOut[vid].pos = screenPos;
-		primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));
-		primitive.dev_verticesOut[vid].eyeNor = MV_normal * inNormal;
+		
+		primitive.dev_verticesOut[vid].eyePos = eyePos - inPos;
+		primitive.dev_verticesOut[vid].eyeNor = inNormal;
 	}
 }
 
@@ -740,8 +739,8 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 							{
 								if (currDepth < dev_depth[pixelIndex])
 								{
-									dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.f);
 									dev_fragmentBuffer[pixelIndex].eyeNor = (baryCoord.x * v1.eyeNor) + (baryCoord.y * v2.eyeNor) + (baryCoord.z * v3.eyeNor);
+									dev_fragmentBuffer[pixelIndex].color = dev_fragmentBuffer[pixelIndex].eyeNor;
 									dev_depth[pixelIndex] = currDepth;
 								}
 							}
@@ -767,7 +766,7 @@ void _fragmentShader()
 /**
  * Perform rasterization.
  */
-void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) {
+void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3& MV_normal, const glm::mat3& M_inverseTranspose, const glm::vec3& eyePos) {
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -795,7 +794,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
 				// 1. Vertex Assembly and Shader
-				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(*p, MVP, MV, MV_normal, width, height);
+				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(*p, MVP, MV, MV_normal, M_inverseTranspose, eyePos, width, height);
 				checkCUDAError("Vertex Processing");
 
 				cudaDeviceSynchronize();
