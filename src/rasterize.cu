@@ -67,6 +67,8 @@ namespace {
 		// VertexAttributeTexcoord texcoord0;
 		 TextureData* dev_diffuseTex;
 		 int uvStart;
+		 glm::vec2 bilinearUV;
+		 int texWidth, texHeight;
 		// ...
 	};
 
@@ -104,14 +106,15 @@ namespace {
 #define SSAA_FACTOR 2
 
 // Are we using UV tex mapping w/ bilinear filtering?
-#define TEXTURE 1
+#define TEXTURE 0
+#define TEXTURE_BILINEAR 0
 
 // Are we using perspective correct depth to interpolate?
-#define CORRECT_INTERP 1
+#define CORRECT_INTERP 0
 
 // Debug views for depth & normals
 #define DEBUG_Z 0
-#define DEBUG_NORM 0
+#define DEBUG_NORM 1
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -181,6 +184,38 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 #endif   
 }
 
+__device__ glm::vec3 sampleFromTexture(TextureData* dev_diffuseTex, int uvStart) {
+	return glm::vec3(dev_diffuseTex[uvStart + 0],
+					 dev_diffuseTex[uvStart + 1],
+					 dev_diffuseTex[uvStart + 2]) / 255.f;
+}
+
+__device__ glm::vec3 sampleFromTextureBilinear(TextureData* dev_diffuseTex, glm::vec2 uv, int width, int height) {
+	// top right corner of grid cell
+	int u = uv.x;
+	int v = uv.y;
+
+	// bottom right corner of grid cell
+	int u1 = glm::clamp(u + 1, 0, width - 1);
+	int v1 = glm::clamp(v + 1, 0, height - 1);
+
+	// sample all 4 colors using indices to sample from texture
+	int id00 = (u + v * width) * 3;
+	int id01 = (u + v1 * width) * 3;
+	int id10 = (u1 + v * width) * 3;
+	int id11 = (u1 + v1 * width) * 3;
+	glm::vec3 c00 = sampleFromTexture(dev_diffuseTex, id00);
+	glm::vec3 c01 = sampleFromTexture(dev_diffuseTex, id01);
+	glm::vec3 c10 = sampleFromTexture(dev_diffuseTex, id10);
+	glm::vec3 c11 = sampleFromTexture(dev_diffuseTex, id11);
+
+	// lerp horizontally using x fraction
+	glm::vec3 lerp1 = glm::mix(c00, c01, (float)uv.x - (float)u);
+	glm::vec3 lerp2 = glm::mix(c10, c11, (float)uv.x - (float)u);
+
+	// return lerped color vertically using y fraction
+	return  glm::mix(lerp1, lerp2, (float)uv.y - (float)v);
+}
 /** 
 * Writes fragment colors to the framebuffer
 */
@@ -195,9 +230,11 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 		Fragment f = fragmentBuffer[index];
 #if TEXTURE
 		if (f.dev_diffuseTex) {
-			f.color = glm::vec3(f.dev_diffuseTex[f.uvStart + 0],
-				f.dev_diffuseTex[f.uvStart + 1],
-				f.dev_diffuseTex[f.uvStart + 2]) / 255.f;
+	#if TEXTURE_BILINEAR
+			f.color = sampleFromTextureBilinear(f.dev_diffuseTex, f.bilinearUV, f.texWidth, f.texHeight);
+	#else
+			f.color = sampleFromTexture(f.dev_diffuseTex, f.uvStart);
+	#endif
 		}
 		else {
 			f.color = glm::vec3(0.f);
@@ -826,7 +863,7 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 #endif
 							
 			
-							// Debug views handling
+							/***** Debug views handling ****/
 #if DEBUG_Z
 							f.color = glm::abs(glm::vec3(1.f - baryDepth));
 							
@@ -835,7 +872,7 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 							f.color = f.eyeNor;
 #endif
 
-							// Texture handling
+							/***** Texture handling ****/
 #if TEXTURE
 	#if CORRECT_INTERP
 							// get the starting index of the color in the tex buffer
@@ -850,7 +887,13 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 	#endif
 							uv.x *= p.v[0].texWidth;
 							uv.y *= p.v[0].texHeight;
-							f.uvStart = ((int)uv.x + (int)uv.y * p.v[0].texWidth) * 3; // actual index into tex buffer
+#if TEXTURE_BILINEAR
+							f.bilinearUV = uv;
+							f.texWidth = p.v[0].texWidth;
+							f.texHeight = p.v[0].texHeight;
+#endif
+							// actual index into tex buffer is 1D, multip by 3 since every 3 floats (rgb) is a color
+							f.uvStart = ((int)uv.x + (int)uv.y * p.v[0].texWidth) * 3;
 							f.dev_diffuseTex = p.v[0].dev_diffuseTex;
 #endif
 							dev_fragmentBuffer[pixelIdx] = f;
