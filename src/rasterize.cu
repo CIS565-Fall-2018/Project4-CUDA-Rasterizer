@@ -98,12 +98,19 @@ namespace {
 
 }
 
+// Are we supersampling the input and downsampling the output to get AA effect?
 #define SSAA 0
 #define SSAA_FACTOR 2
+
+// Are we using UV tex mapping w/ bilinear filtering?
 #define TEXTURE 0
 
+// Are we using perspective correct depth to interpolate?
+#define CORRECT_INTERP 1 
+
+// Debug views for depth & normals
 #define DEBUG_Z 0
-#define DEBUG_NORM 0
+#define DEBUG_NORM 1
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -780,6 +787,26 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 						if (newDepth < dev_depth[pixelIdx]) {
 							dev_depth[pixelIdx] = newDepth;
 							Fragment f;
+#if CORRECT_INTERP
+							// get correct depth to use for interpolation. Logic adapted from CIS460
+							baryDepth = 1.f / (1 / p.v[0].pos.z * baryCoords.x +
+								1 / p.v[1].pos.z * baryCoords.y +
+								1 / p.v[2].pos.z * baryCoords.z);
+
+							f.eyeNor = glm::normalize(baryDepth * (p.v[0].eyeNor * baryCoords.x  / p.v[0].pos.z +
+								p.v[1].eyeNor * baryCoords.y / p.v[1].pos.z +
+								p.v[2].eyeNor * baryCoords.z / p.v[2].pos.z));
+
+							f.eyePos = glm::normalize(baryDepth * (p.v[0].eyePos * baryCoords.x / p.v[0].pos.z +
+								p.v[1].eyePos * baryCoords.y / p.v[1].pos.z +
+								p.v[2].eyePos * baryCoords.z / p.v[2].pos.z));
+
+							f.color = glm::normalize(baryDepth * (p.v[0].col * baryCoords.x / p.v[0].pos.z +
+								p.v[1].col * baryCoords.y / p.v[1].pos.z +
+								p.v[2].col * baryCoords.z / p.v[2].pos.z));
+
+
+#else
 							f.eyeNor = glm::normalize(p.v[0].eyeNor * baryCoords.x +
 									   p.v[1].eyeNor * baryCoords.y + 
 									   p.v[2].eyeNor * baryCoords.z);
@@ -787,6 +814,11 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 							f.eyePos = glm::normalize(p.v[0].eyePos * baryCoords.x +
 								p.v[1].eyePos * baryCoords.y +
 								p.v[2].eyePos * baryCoords.z);
+
+							f.color = glm::normalize(p.v[0].col * baryCoords.x +
+								p.v[1].col * baryCoords.y +
+								p.v[2].col * baryCoords.z);
+#endif
 				
 #if DEBUG_Z
 							f.color = glm::abs(glm::vec3(1.f - baryDepth));
@@ -795,11 +827,6 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 #elif TEXTURE
 							// do something with tex
 
-#else
-							// lambert will be used on the interpolated color
-							f.color = glm::normalize(p.v[0].col * baryCoords.x +
-								p.v[1].col * baryCoords.y +
-								p.v[2].col * baryCoords.z);
 #endif
 							dev_fragmentBuffer[pixelIdx] = f;
 						}
