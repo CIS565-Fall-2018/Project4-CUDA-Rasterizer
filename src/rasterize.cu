@@ -65,7 +65,8 @@ namespace {
 		 glm::vec3 eyePos;	// eye space position used for shading
 		 glm::vec3 eyeNor;
 		// VertexAttributeTexcoord texcoord0;
-		// TextureData* dev_diffuseTex;
+		 TextureData* dev_diffuseTex;
+		 int uvStart;
 		// ...
 	};
 
@@ -103,14 +104,14 @@ namespace {
 #define SSAA_FACTOR 2
 
 // Are we using UV tex mapping w/ bilinear filtering?
-#define TEXTURE 0
+#define TEXTURE 1
 
 // Are we using perspective correct depth to interpolate?
-#define CORRECT_INTERP 1 
+#define CORRECT_INTERP 1
 
 // Debug views for depth & normals
 #define DEBUG_Z 0
-#define DEBUG_NORM 1
+#define DEBUG_NORM 0
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -192,6 +193,17 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 	if (x < w && y < h) {
 
 		Fragment f = fragmentBuffer[index];
+#if TEXTURE
+		if (f.dev_diffuseTex) {
+			f.color = glm::vec3(f.dev_diffuseTex[f.uvStart + 0],
+				f.dev_diffuseTex[f.uvStart + 1],
+				f.dev_diffuseTex[f.uvStart + 2]) / 255.f;
+		}
+		else {
+			f.color = glm::vec3(0.f);
+		}
+#endif	
+
 #if !DEBUG_Z && !DEBUG_NORM
 		glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.2f, 0.7f) - f.eyePos);
 		float lambert = glm::dot(lightDir, f.eyeNor);
@@ -719,7 +731,10 @@ void _vertexTransformAndAssembly(
 		primitive.dev_verticesOut[index].texHeight = primitive.diffuseTexHeight;
 		primitive.dev_verticesOut[index].texWidth = primitive.diffuseTexWidth;
 
-		primitive.dev_verticesOut[index].col = glm::vec3(0.5f, 0.f, 0.f);
+		// pick some color: red, green, or blue
+		int mod = vid % 3;
+		primitive.dev_verticesOut[index].col = glm::vec3(0.f);
+		primitive.dev_verticesOut[index].col[mod] += 0.5f;
 	}
 }
 
@@ -787,46 +802,56 @@ void _computeFragments(int numPrimitives, Primitive* dev_primitives,
 						if (newDepth < dev_depth[pixelIdx]) {
 							dev_depth[pixelIdx] = newDepth;
 							Fragment f;
-#if CORRECT_INTERP
-							// get correct depth to use for interpolation. Logic adapted from CIS460
-							baryDepth = 1.f / (1 / p.v[0].pos.z * baryCoords.x +
-								1 / p.v[1].pos.z * baryCoords.y +
-								1 / p.v[2].pos.z * baryCoords.z);
 
-							f.eyeNor = glm::normalize(baryDepth * (p.v[0].eyeNor * baryCoords.x  / p.v[0].pos.z +
-								p.v[1].eyeNor * baryCoords.y / p.v[1].pos.z +
-								p.v[2].eyeNor * baryCoords.z / p.v[2].pos.z));
-
-							f.eyePos = glm::normalize(baryDepth * (p.v[0].eyePos * baryCoords.x / p.v[0].pos.z +
-								p.v[1].eyePos * baryCoords.y / p.v[1].pos.z +
-								p.v[2].eyePos * baryCoords.z / p.v[2].pos.z));
-
-							f.color = glm::normalize(baryDepth * (p.v[0].col * baryCoords.x / p.v[0].pos.z +
-								p.v[1].col * baryCoords.y / p.v[1].pos.z +
-								p.v[2].col * baryCoords.z / p.v[2].pos.z));
-
-
-#else
 							f.eyeNor = glm::normalize(p.v[0].eyeNor * baryCoords.x +
-									   p.v[1].eyeNor * baryCoords.y + 
-									   p.v[2].eyeNor * baryCoords.z);
+								p.v[1].eyeNor * baryCoords.y +
+								p.v[2].eyeNor * baryCoords.z);
 
 							f.eyePos = glm::normalize(p.v[0].eyePos * baryCoords.x +
 								p.v[1].eyePos * baryCoords.y +
 								p.v[2].eyePos * baryCoords.z);
+#if CORRECT_INTERP
+							// get correct depth to use for interpolation. Logic adapted from CIS460
+							float newBaryDepth = 1.f / (1 / p.v[0].pos.z * baryCoords.x +
+								1 / p.v[1].pos.z * baryCoords.y +
+								1 / p.v[2].pos.z * baryCoords.z);
 
+							f.color = glm::normalize(newBaryDepth * (p.v[0].col * baryCoords.x / p.v[0].pos.z +
+								p.v[1].col * baryCoords.y / p.v[1].pos.z +
+								p.v[2].col * baryCoords.z / p.v[2].pos.z));
+#else
 							f.color = glm::normalize(p.v[0].col * baryCoords.x +
 								p.v[1].col * baryCoords.y +
 								p.v[2].col * baryCoords.z);
 #endif
-				
+							
+			
+							// Debug views handling
 #if DEBUG_Z
 							f.color = glm::abs(glm::vec3(1.f - baryDepth));
-#elif DEBUG_NORM
+							
+#endif
+#if DEBUG_NORM
 							f.color = f.eyeNor;
-#elif TEXTURE
-							// do something with tex
+#endif
 
+							// Texture handling
+#if TEXTURE
+	#if CORRECT_INTERP
+							// get the starting index of the color in the tex buffer
+							glm::vec2 uv = newBaryDepth * (p.v[0].texcoord0 * baryCoords.x / p.v[0].pos.z +
+								p.v[1].texcoord0 * baryCoords.y / p.v[1].pos.z +
+								p.v[2].texcoord0 * baryCoords.z / p.v[2].pos.z);
+							
+	#else
+							glm::vec2 uv = p.v[0].texcoord0 * baryCoords.x +
+								p.v[1].texcoord0 * baryCoords.y +
+								p.v[2].texcoord0 * baryCoords.z;
+	#endif
+							uv.x *= p.v[0].texWidth;
+							uv.y *= p.v[0].texHeight;
+							f.uvStart = ((int)uv.x + (int)uv.y * p.v[0].texWidth) * 3; // actual index into tex buffer
+							f.dev_diffuseTex = p.v[0].dev_diffuseTex;
 #endif
 							dev_fragmentBuffer[pixelIdx] = f;
 						}
