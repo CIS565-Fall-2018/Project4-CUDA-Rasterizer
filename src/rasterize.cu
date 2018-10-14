@@ -702,10 +702,10 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 		AABB box = getAABBForTriangle(vertices);
 
 		// loop over all pixels to see if it's in p
-		for (int j = (int)box.min.y - 1; j < (int)box.max.y + 1; j++) {
-			for (int i = (int)box.max.x - 1; i < (int)box.max.x + 1; i++) {
+		for (int j = (int)box.min.y; j < (int)box.max.y + 1; j++) {
+			for (int i = (int)box.min.x; i < (int)box.max.x + 1; i++) {
 				int fidx = j * width + i;
-				glm::vec2 fragmentPos = glm::vec2(i + 0.5f, j + 0.5f);
+				glm::vec2 fragmentPos = glm::vec2(i + 0.5, j + 0.5f);
 				glm::vec3 baryCoor = calculateBarycentricCoordinate(vertices, fragmentPos);
 
 				// if it is, store p's value into the pixel
