@@ -54,6 +54,7 @@ int main(int argc, char **argv) {
     seconds = time(NULL);
     fpstracker = 0;
 
+
     // Launch CUDA/GL
     if (init(scene)) {
         // GLFW main loop
@@ -121,7 +122,7 @@ void runCuda() {
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
 	rasterize(dptr, MVP, MV, MV_normal);
-    cudaGLUnmapBufferObject(pbo);
+	cudaGLUnmapBufferObject(pbo);
 
     frame++;
     fpstracker++;
@@ -395,6 +396,6 @@ void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 
 void mouseWheelCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
-	const double s = 1.0;	// sensitivity
+	const double s = 0.1;	// sensitivity
 	z_trans += (float)(s * yoffset);
 }
