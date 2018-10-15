@@ -82,7 +82,6 @@ namespace {
 		VertexAttributePosition* dev_position;
 		VertexAttributeNormal* dev_normal;
 		VertexAttributeTexcoord* dev_texcoord0;
-PERSPECTIVE_CORRECT
 		// Materials, add more attributes when needed
 		TextureData* dev_diffuseTex;
 		int diffuseTexWidth;
@@ -99,10 +98,12 @@ PERSPECTIVE_CORRECT
 
 }
 
-#define BLINN 0
-#define LAMBERT 1
+#define BLINN 1
+#define LAMBERT 0
 #define BILINEAR_FILTERING 0
-#define PERSPECTIVE_CORRECT 1
+#define PERSPECTIVE_CORRECT 0
+#define RASTERIZE_POINT 1
+#define RASTERIZE_LINE 0
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -152,9 +153,13 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
     if (x < w && y < h) {
 
+#if RASTERIZE_POINT || RASTERIZE_LINE
+		framebuffer[index] = fragmentBuffer[index].color;
+#else
+
 		// TODO: add your fragment shader code here
 		Fragment frag = fragmentBuffer[index];
-		glm::vec3 lightPos(0.f, 0.f, 10.f);
+		glm::vec3 lightPos(5.f, 5.f, 5.f);
 		glm::vec3 lightVec = glm::normalize((lightPos - frag.eyePos));
 		glm::vec3 specColor(0.f, 0.f, 0.f);
 		float lambertian = glm::max(glm::dot(lightVec, frag.eyeNor), 0.0f);
@@ -175,6 +180,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 		res = frag.color;
 #endif
 		framebuffer[index] = res;
+#endif
     }
 }
 
@@ -747,21 +753,62 @@ __device__ glm::vec3 getBilinearFilteredPixelColor(TextureData* texture, float u
 	return glm::vec3(r, g, b);
 }
 
+__host__ __device__ static
+void drawpoint(int width, int height, glm::vec3 p, Fragment* fragments, glm::vec3 color)
+{
+	int x = glm::clamp(p.x, 0.f, (float)(width - 1));
+	int y = glm::clamp(p.y, 0.f, (float)(height - 1));
+	fragments[x + y * width].color = color;
+}
+
 __global__ void rasterize_triangle(const int width, const int height, int* depth, int numPrimitives, Primitive* primitives, Fragment* fragmentBuffer) {
 	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 	if (index >= numPrimitives) {
 		return;
 	}
 	Primitive frag = primitives[index];
-	// backface culling
-	//if (glm::dot(frag.v[0].eyeNor, frag.v[0].eyePos) >= 0.f) {
-	//	return;
-	//}
 	glm::vec3 tri[3];
 	tri[0] = glm::vec3(frag.v[0].pos);
 	tri[1] = glm::vec3(frag.v[1].pos);
 	tri[2] = glm::vec3(frag.v[2].pos);
-
+#if RASTERIZE_POINT
+	glm::vec3 pointCol = glm::vec3(1.f, 0.f, 0.f);
+	for (int i = 0; i < 3; i++) {
+		tri[i].x = glm::clamp(tri[i].x, 0.f, (float)(width - 1));
+		tri[i].y = glm::clamp(tri[i].y, 0.f, (float)(height - 1));
+		int pixel = int(tri[i].x) + int(tri[i].y) * width;
+		fragmentBuffer[pixel].color = pointCol;
+	}
+#elif RASTERIZE_LINE
+	glm::vec3 lineCol = glm::vec3(0.f, 0.f, 1.f);
+	glm::vec2 start = glm::vec2(tri[0].x, tri[0].y);
+	glm::vec2 end = glm::vec2(tri[1].x, tri[1].y);
+	float length = glm::length(glm::vec2(end.x - start.x, end.y - start.y));
+	for (float di = 0.f; di < 1.f; di += 1.f / length) {
+		int x = start.x * (1 - di) + end.x * di;
+		int y = start.y * (1 - di) + end.y * di;
+		int pixel = x + y * width;
+		fragmentBuffer[pixel].color = lineCol;
+	}
+	start = glm::vec2(tri[1].x, tri[1].y);
+	end = glm::vec2(tri[2].x, tri[2].y);
+	length = glm::length(glm::vec2(end.x - start.x, end.y - start.y));
+	for (float di = 0.f; di < 1.f; di += 1.f / length) {
+		int x = start.x * (1 - di) + end.x * di;
+		int y = start.y * (1 - di) + end.y * di;
+		int pixel = x + y * width;
+		fragmentBuffer[pixel].color = lineCol;
+	}
+	start = glm::vec2(tri[2].x, tri[2].y);
+	end = glm::vec2(tri[0].x, tri[0].y);
+	length = glm::length(glm::vec2(end.x - start.x, end.y - start.y));
+	for (float di = 0.f; di < 1.f; di += 1.f / length) {
+		int x = start.x * (1 - di) + end.x * di;
+		int y = start.y * (1 - di) + end.y * di;
+		int pixel = x + y * width;
+		fragmentBuffer[pixel].color = lineCol;
+	}
+#else
 	AABB bb = getAABBForTriangle(tri);
 	bb.min[0] = glm::clamp(bb.min[0], 0.f, float(width) - 1);
 	bb.min[1] = glm::clamp(bb.min[1], 0.f, float(height) - 1);
@@ -817,6 +864,7 @@ __global__ void rasterize_triangle(const int width, const int height, int* depth
 			}
 		}
 	}
+#endif
 }
 
 
