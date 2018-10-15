@@ -1,18 +1,33 @@
 CUDA Rasterizer
 ===============
 
-[CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
-
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Lan Lou
+	*  [github](https://github.com/LanLou123).
+* Tested on: Windows 10, i7-6700HQ @ 2.60GHz 16GB, GTX 1070 8GB (Personal Laptop)
 
-### (TODO: Your README)
+### Sample Rasterization
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+#### ```resolution```: 900X900 ```GLTF model```: cesiummilktruck ```shader``` : blinn_phong perspective corrected bilinear textureed
+![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/truck.gif)
+
+
+diffuse buffer|depth buffer|
+------------|--------
+![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/diffuse.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/depth.gif)  
+
+normal buffer|specular buffer|
+------------|--------
+![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/normal.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/spec.gif)
+
+#### combined:
+![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/res.gif)
+
+point|line|triangle
+-----|----|-----
+![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/p.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/line.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/lamm.gif)
+
 
 
 ### Credits
