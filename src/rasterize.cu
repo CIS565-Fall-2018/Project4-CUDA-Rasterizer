@@ -48,6 +48,7 @@ namespace {
 		 TextureData* dev_diffuseTex = NULL;
 		// int texWidth, texHeight;
 		// ...
+		 int diffuseTexWidth, diffuseTexHeight;
 	};
 
 	struct Primitive {
@@ -62,8 +63,8 @@ namespace {
 		// The attributes listed below might be useful, 
 		// but always feel free to modify on your own
 
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
+		 glm::vec3 eyePos;	// eye space position used for shading
+		 glm::vec3 eyeNor;
 		// VertexAttributeTexcoord texcoord0;
 		// TextureData* dev_diffuseTex;
 		// ...
@@ -641,7 +642,29 @@ void _vertexTransformAndAssembly(
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-		
+		VertexOut& thisDevVertexOut = primitive.dev_verticesOut[vid];
+		//multiply model-view-projective matrix
+		glm::vec4 worldSpacePos = MVP * glm::vec4(primitive.dev_position[vid], 1.0f);
+		//Projective divide
+		glm::vec4 NDCpos = worldSpacePos * (1.0f / worldSpacePos.w);
+		//transform into pixels
+		glm::vec4 PixelPos = glm::vec4(
+			(NDCpos.x + 1.0f) * (float)width / 2.0f,
+			(1.0f - NDCpos.y) * (float)height / 2.0f,
+			NDCpos.z,
+			NDCpos.w);
+		//write into vertexout struct
+		thisDevVertexOut.pos = PixelPos;
+		glm::vec3 eyeSpacePos = glm::vec3(MV * glm::vec4(primitive.dev_position[vid], 1.0f));
+		thisDevVertexOut.eyePos = eyeSpacePos;
+		glm::vec3 eyeSpaceNormal = glm::normalize(MV_normal * primitive.dev_normal[vid]);
+		thisDevVertexOut.eyeNor = eyeSpaceNormal;
+		//texture coords
+		thisDevVertexOut.texcoord0 = primitive.dev_texcoord0[vid];
+		//diffuse texture
+		thisDevVertexOut.dev_diffuseTex = primitive.dev_diffuseTex;
+		thisDevVertexOut.diffuseTexHeight = primitive.diffuseTexHeight;
+		thisDevVertexOut.diffuseTexWidth = primitive.diffuseTexWidth;
 	}
 }
 
@@ -660,12 +683,12 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
 
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
+		int pid;	// id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 
 		// TODO: other primitive types (point, line)
@@ -673,7 +696,218 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
+/**
+ * Helper function, determine whether a point is inside a triangle
+ */
+__device__
+bool isPosInTriangle(glm::vec3 p, glm::vec3 pos1, glm::vec3 pos2, glm::vec3 pos3)
+{
+	glm::vec3 v(p[0], p[1], 0.f);
+	glm::vec3 v1(pos1[0], pos1[1], 0.f);
+	glm::vec3 v2(pos2[0], pos2[1], 0.f);
+	glm::vec3 v3(pos3[0], pos3[1], 0.f);
 
+	//compute areas for barycentric coordinates
+	float area = 0.5f * glm::length(glm::cross(v1 - v2, v3 - v2));
+	float area1 = 0.5f * glm::length(glm::cross(v - v2, v3 - v2));
+	float area2 = 0.5f * glm::length(glm::cross(v - v3, v1 - v3));
+	float area3 = 0.5f * glm::length(glm::cross(v - v1, v2 - v1));
+
+	//check the sum of three (signed) areas against the whole area
+	return glm::abs(area1 + area2 + area3 - area) < 0.1f;
+}
+
+/**
+ * Helper function, interpolate depth value
+ * Argument list: p is in screen space: (pixel.x, pixel.y, 0)
+ * pos1, pos2, pos3 are in combination of screen space and camera space: (pixel.x, pixel.y, eyeSpace.z)
+ */
+
+__device__
+float depthInterpolate(glm::vec3 p,
+	glm::vec3 pos1, glm::vec3 pos2, glm::vec3 pos3)
+{
+	glm::vec3 v1(pos1[0], pos1[1], 0.f);
+	glm::vec3 v2(pos2[0], pos2[1], 0.f);
+	glm::vec3 v3(pos3[0], pos3[1], 0.f);
+
+	//compute areas for barycentric coordinates
+	float area = 0.5f * glm::length(glm::cross(v1 - v2, v3 - v2));
+	float area1 = 0.5f * glm::length(glm::cross(p - v2, v3 - v2));
+	float area2 = 0.5f * glm::length(glm::cross(p - v3, v1 - v3));
+	float area3 = 0.5f * glm::length(glm::cross(p - v1, v2 - v1));
+
+	//calculate interpolated z:
+	float z_inverse_interpolated = area1 / (pos1[2] * area) + area2 / (pos2[2] * area) + area3 / (pos3[2] * area);
+	return 1.0f / z_inverse_interpolated;
+}
+
+/**
+ * Helper function, interpolate any vec2 vertex attributes, mainly for texture coords
+ * Argument list: p, pos1, pos2, pos3 are in combination of screen space and camera space: (pixel.x, pixel.y, eyeSpace.z)
+ * Attributes to interpolate are attri1, attri2 and attri3
+ */
+__device__
+glm::vec2 vec2AttriInterpolate(glm::vec3 p,
+	glm::vec3 pos1, glm::vec3 pos2, glm::vec3 pos3,
+	glm::vec2 attri1, glm::vec2 attri2, glm::vec2 attri3)
+{
+	glm::vec3 v(p[0], p[1], 0.f);
+	glm::vec3 v1(pos1[0], pos1[1], 0.f);
+	glm::vec3 v2(pos2[0], pos2[1], 0.f);
+	glm::vec3 v3(pos3[0], pos3[1], 0.f);
+
+	//compute areas for barycentric coordinates
+	float area = 0.5f * glm::length(glm::cross(v1 - v2, v3 - v2));
+	float area1 = 0.5f * glm::length(glm::cross(v - v2, v3 - v2));
+	float area2 = 0.5f * glm::length(glm::cross(v - v3, v1 - v3));
+	float area3 = 0.5f * glm::length(glm::cross(v - v1, v2 - v1));
+
+	//formula:
+	// A/Z = Sigma (Ai/Zi * Si/S)
+	glm::vec2 AttriIntepolate =
+		(attri1 / pos1[2]) * (area1 / area)
+		+ (attri2 / pos2[2]) * (area2 / area)
+		+ (attri3 / pos3[2]) * (area3 / area);
+	return AttriIntepolate * p[2];
+}
+
+/**
+ * Helper function, interpolate any vec3 vertex attributes
+ * Argument list: p, pos1, pos2, pos3 are in combination of screen space and camera space: (pixel.x, pixel.y, eyeSpace.z)
+ * Attributes to interpolate are attri1, attri2 and attri3
+ * basicall same as vec2 attribute interpolation, but with vec3
+ */
+__device__
+glm::vec3 vec3AttriInterpolate(glm::vec3 p,
+	glm::vec3 pos1, glm::vec3 pos2, glm::vec3 pos3,
+	glm::vec3 attri1, glm::vec3 attri2, glm::vec3 attri3)
+{
+	glm::vec3 v(p[0], p[1], 0.f);
+	glm::vec3 v1(pos1[0], pos1[1], 0.f);
+	glm::vec3 v2(pos2[0], pos2[1], 0.f);
+	glm::vec3 v3(pos3[0], pos3[1], 0.f);
+
+	//compute areas for barycentric coordinates
+	float area = 0.5f * glm::length(glm::cross(v1 - v2, v3 - v2));
+	float area1 = 0.5f * glm::length(glm::cross(v - v2, v3 - v2));
+	float area2 = 0.5f * glm::length(glm::cross(v - v3, v1 - v3));
+	float area3 = 0.5f * glm::length(glm::cross(v - v1, v2 - v1));
+
+	//formula:
+	// A/Z = Sigma (Ai/Zi * Si/S)
+	glm::vec3 AttriIntepolate =
+		(attri1 / pos1[2]) * (area1 / area)
+		+ (attri2 / pos2[2]) * (area2 / area)
+		+ (attri3 / pos3[2]) * (area3 / area);
+	return AttriIntepolate * p[2];
+}
+
+
+/**
+ * For each primitive(persumably triangles here)
+ */
+__global__ 
+void rasterizerFillPrimitive(int numPrimitives, Primitive* primitives,
+	Fragment* fragmentBuffer, int* depth, int w, int h)
+{
+	int primitiveIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (primitiveIdx < numPrimitives)
+	{
+		Primitive& thisPrimitive = primitives[primitiveIdx];
+
+		//todo: diffuse texture here
+		int diffuseTexWidth = thisPrimitive.v[0].diffuseTexWidth;
+		int diffuseTexHeight = thisPrimitive.v[0].diffuseTexHeight;
+		TextureData* textureData = thisPrimitive.v[0].dev_diffuseTex;
+		//get triangle info
+		glm::vec3 p1(thisPrimitive.v[0].pos[0], thisPrimitive.v[0].pos[1], thisPrimitive.v[0].eyePos[2]);
+		glm::vec3 p2(thisPrimitive.v[1].pos[0], thisPrimitive.v[1].pos[1], thisPrimitive.v[1].eyePos[2]);
+		glm::vec3 p3(thisPrimitive.v[2].pos[0], thisPrimitive.v[2].pos[1], thisPrimitive.v[2].eyePos[2]);
+
+		//2D Bounding Box
+		float xMin = fminf(p1.x, fminf(p2.x, p3.x));
+		float xMax = fmaxf(p1.x, fmaxf(p2.x, p3.x));
+		float yMin = fminf(p1.y, fminf(p2.y, p3.y));
+		float yMax = fmaxf(p1.y, fmaxf(p2.y, p3.y));
+
+		//get start and end indices in pixel from bounding box
+		float xStart = (int)glm::floor(xMin);
+		float xEnd = (int)glm::ceil(xMax);
+
+		float yStart = (int)glm::floor(yMin);
+		float yEnd = (int)glm::ceil(yMax);
+
+		//scan pixel lines to fill the current primitive(triangle)
+		for (int i = yStart; i < yEnd; i++)
+		{
+			for (int j = xStart; j < xEnd; j++)
+			{
+				// test if the pos is inside the current triangle
+				if (isPosInTriangle(glm::vec3(j, i, 0.f), p1, p2, p3))
+				{
+					//interpolate depth 
+					//depth value is in eye pace
+					float z_interpolated = depthInterpolate(glm::vec3(j, i, 0.f), p1, p2, p3);
+
+					//CAUTIOUS(basic)
+					//We need to use atomic function to write depth value
+					//But it only supports integers, so we multiply it by a large number to get as many digits as we can
+					//Note: int32 is bwtween -2^31 and 2^31, which is 2147483648
+					int z_rounded = (int)(z_interpolated * 10000.0f);
+
+					//atomic depth writing
+					int fragmentIdx = j + (i * w);
+					int oldDepth = depth[fragmentIdx];
+					int assumed;
+
+					do {
+						assumed = oldDepth;
+						oldDepth = atomicMin(&depth[fragmentIdx], z_rounded);
+					} while (assumed != oldDepth);
+
+					//read depth to perform z-test
+					if (z_rounded <= depth[fragmentIdx])
+					{
+						//the current fragment is in front, so we use it to color
+						Fragment& thisFragment = fragmentBuffer[fragmentIdx];
+
+						//The pos of current interested fragment
+						glm::vec3 p((float)j, (float)i, z_interpolated);
+
+						//interpolate UV coordinates here 
+						glm::vec2 uv_interpolated = vec2AttriInterpolate(p, p1, p2, p3,
+							thisPrimitive.v[0].texcoord0, thisPrimitive.v[1].texcoord0, thisPrimitive.v[2].texcoord0);
+						//interpolate eyeSpace position here
+						glm::vec3 eyeSpacePos_interpolated = vec3AttriInterpolate(p, p1, p2, p3,
+							thisPrimitive.v[0].eyePos, thisPrimitive.v[1].eyePos, thisPrimitive.v[2].eyePos);
+						thisFragment.eyePos = eyeSpacePos_interpolated;
+						//interpolate eye normal here
+						glm::vec3 eyeNor_interpolated = vec3AttriInterpolate(p, p1, p2, p3,
+							thisPrimitive.v[0].eyeNor, thisPrimitive.v[1].eyeNor, thisPrimitive.v[2].eyeNor);
+						//read texture and color the fragment
+						glm::ivec2 texSpaceCoord = glm::ivec2(diffuseTexWidth * uv_interpolated.x,
+							diffuseTexHeight * uv_interpolated.y);
+						int texIdx = texSpaceCoord.x + diffuseTexWidth * texSpaceCoord.y;
+
+						//read from color channels
+						int textChannelsNum = 3;
+						TextureData r = textureData[texIdx * textChannelsNum];
+						TextureData g = textureData[texIdx * textChannelsNum + 1];
+						TextureData b = textureData[texIdx * textChannelsNum + 2];
+
+						thisFragment.color = glm::vec3((float)r / 255.0f,
+							(float)g / 255.0f,
+							(float)b / 255.0f);
+					}
+
+				}
+			}
+
+		}
+
+	}
+}
 
 /**
  * Perform rasterization.
@@ -724,7 +958,25 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	
 	// TODO: rasterize
 
+	dim3 numThreadsPerBlock(128);
 
+	auto it = mesh2PrimitivesMap.begin();
+	auto itEnd = mesh2PrimitivesMap.end();
+
+	for (; it != itEnd; ++it)
+	{
+		auto p = (it->second).begin();
+		auto pEnd = (it->second).end();
+		for (; p != pEnd; ++p)
+		{
+			//launch kernel to fill fragments
+			dim3 numBlocksForPrimitives((p->numPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+			rasterizerFillPrimitive<<<numBlocksForPrimitives, numThreadsPerBlock>>>(p->numPrimitives, dev_primitives, dev_fragmentBuffer,
+				dev_depth, width, height);
+			checkCUDAError("rasterizerFillPrimitive error!");
+			cudaDeviceSynchronize();
+		}
+	}
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
