@@ -66,8 +66,11 @@ namespace
     // The attributes listed below might be useful, 
     // but always feel free to modify on your own
 
-    // glm::vec3 eyePos;	// eye space position used for shading
-    // glm::vec3 eyeNor;
+    glm::vec3 pos;
+    glm::vec3 normal;
+    glm::vec2 uv;
+
+
     // VertexAttributeTexcoord texcoord0;
     // TextureData* dev_diffuseTex;
     // ...
@@ -153,9 +156,22 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer)
 
   if (x < w && y < h)
   {
-    framebuffer[index] = fragmentBuffer[index].color;
+    const Fragment& frag = fragmentBuffer[index];
+
+    float ambientTerm = 0.2f;
+
+    glm::vec3 fragColor = frag.color;
+
+    glm::vec3 lightVector = glm::normalize(glm::vec3(glm::vec3(5, 5, 0) - frag.pos));
+
+    float diffuseTerm = glm::dot(lightVector, glm::normalize(frag.normal));
+    diffuseTerm = glm::clamp(diffuseTerm, 0.0f, 1.0f);
+
+    framebuffer[index] = (ambientTerm + diffuseTerm) * fragColor;
 
     // TODO: add your fragment shader code here
+
+
   }
 }
 
@@ -865,9 +881,11 @@ __device__ void TryStoreFragment(float xCoord, int yCoord, const VertexOut& v1, 
   const float fragmentDepth = 1.0f / ((ratio1 * (1.0f / v1.pos[2])) + (ratio2 * (1.0f / v2.pos[2])) +(ratio3 * (1.0f / v3.pos[2])));
   const int fragmentIntegerDepth = fragmentDepth * INT_MAX;
 
-  //const glm::vec3 vertexOutColor = fragmentDepth * ((ratio1 * (colorP1 / z1)) + (ratio2 * (colorP2 / z2)) +
-  //  (ratio3 * (colorP3 / z3)));;
+  // const glm::vec3 vertexOutColor = fragmentDepth * ((ratio1 * (colorP1 / v1.pos[2])) + (ratio2 * (colorP2 / v2.pos[2])) + (ratio3 * (colorP3 / v3.pos[2])));;
 
+  const glm::vec2 interpolatedUV = fragmentDepth * ((ratio1 * (v1.texcoord0 / v1.pos[2])) + (ratio2 * (v2.texcoord0 / v2.pos[2])) + (ratio3 * (v3.texcoord0 / v3.pos[2])));
+  const glm::vec3 interpolatedEyeNormal = fragmentDepth * ((ratio1 * (v1.eyeNor / v1.pos[2])) + (ratio2 * (v2.eyeNor / v2.pos[2])) + (ratio3 * (v3.eyeNor / v3.pos[2])));
+  const glm::vec3 interpolatedEyePos = fragmentDepth * ((ratio1 * (v1.eyePos / v1.pos[2])) + (ratio2 * (v2.eyePos / v2.pos[2])) + (ratio3 * (v3.eyePos / v3.pos[2])));
  
   //color = Triangle::BaryInterpolateColor(v1, v2, v3, targetPoint);
 
@@ -880,10 +898,13 @@ __device__ void TryStoreFragment(float xCoord, int yCoord, const VertexOut& v1, 
 
   Fragment targetFragment;
   targetFragment.color = glm::vec3(1,0,0);
+  targetFragment.uv = interpolatedUV;
+  targetFragment.normal = interpolatedEyeNormal;
+  targetFragment.pos = interpolatedEyePos;
 
   const int minDepth = atomicMin(&depth[pixelIndex], fragmentIntegerDepth);
 
-  if (minDepth != fragmentIntegerDepth) {
+  if (minDepth > fragmentIntegerDepth) {
     depth[pixelIndex] = fragmentIntegerDepth;
     fragmentBuffer[pixelIndex] = targetFragment;
   }
