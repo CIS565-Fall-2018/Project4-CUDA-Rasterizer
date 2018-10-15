@@ -48,8 +48,8 @@ namespace
     // glm::vec3 col;
     glm::vec2 texcoord0;
     TextureData* dev_diffuseTex = NULL;
-    // int texWidth, texHeight;
-    // ...
+    int diffuseTexWidth;
+    int diffuseTexHeight;
   };
 
   struct Primitive
@@ -72,8 +72,9 @@ namespace
 
 
     // VertexAttributeTexcoord texcoord0;
-    // TextureData* dev_diffuseTex;
-    // ...
+    TextureData* dev_diffuseTex;
+    int diffuseTexWidth;
+    int diffuseTexHeight;
   };
 
   struct PrimitiveDevBufPointers
@@ -161,6 +162,18 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer)
     float ambientTerm = 0.2f;
 
     glm::vec3 fragColor = frag.color;
+    if (frag.dev_diffuseTex) {
+      const int pixelX = glm::floor(frag.uv.x * frag.diffuseTexWidth);
+      const int pixelY = glm::floor(frag.uv.y * frag.diffuseTexHeight);
+      const int linearCoordinate = pixelX + (frag.diffuseTexWidth * pixelY);
+
+      const int strideFormat = 3;
+      const uint8_t red = *((uint8_t*)&frag.dev_diffuseTex[strideFormat * linearCoordinate]);
+      const uint8_t green = *((uint8_t*)&frag.dev_diffuseTex[strideFormat * linearCoordinate + 1]);
+      const uint8_t blue = *((uint8_t*)&frag.dev_diffuseTex[strideFormat * linearCoordinate + 2]);
+
+      fragColor = glm::vec3(red / 255.0f, green / 255.0f, blue / 255.0f);
+    }
 
     glm::vec3 lightVector = glm::normalize(glm::vec3(glm::vec3(5, 5, 0) - frag.pos));
 
@@ -698,6 +711,10 @@ void _vertexTransformAndAssembly(
     primitive.dev_verticesOut[vid].pos = screenPosition;
     primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(devicePosition, 1.0f));
     primitive.dev_verticesOut[vid].eyeNor = MV_normal * primitive.dev_normal[vid];
+    primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
+    primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
+    primitive.dev_verticesOut[vid].diffuseTexWidth = primitive.diffuseTexWidth;
+    primitive.dev_verticesOut[vid].diffuseTexHeight = primitive.diffuseTexHeight;
 
     // TODO: Apply vertex assembly here
     // Assemble all attribute arraies into the primitive array
@@ -872,7 +889,7 @@ __device__ bool CalculateIntersection(const glm::vec2& p0,
   return false;
 }
 
-__device__ void TryStoreFragment(float xCoord, int yCoord, const VertexOut& v1, const VertexOut& v2, const VertexOut& v3, const glm::vec3& baryCoordinates, int pixelIndex, int* depth, Fragment* fragmentBuffer) {
+__device__ void TryStoreFragment(const Primitive& target, float xCoord, int yCoord, int screenWidth, int screenHeight, const VertexOut& v1, const VertexOut& v2, const VertexOut& v3, const glm::vec3& baryCoordinates, int pixelIndex, int* depth, Fragment* fragmentBuffer) {
   const float ratio1 = baryCoordinates.x;
   const float ratio2 = baryCoordinates.y;
   const float ratio3 = baryCoordinates.z;
@@ -897,10 +914,13 @@ __device__ void TryStoreFragment(float xCoord, int yCoord, const VertexOut& v1, 
   //Fragment frag = m_fragments[idx];
 
   Fragment targetFragment;
-  targetFragment.color = glm::vec3(1,0,0);
+  targetFragment.color = glm::vec3(1, 0, 0);
   targetFragment.uv = interpolatedUV;
   targetFragment.normal = interpolatedEyeNormal;
   targetFragment.pos = interpolatedEyePos;
+  targetFragment.dev_diffuseTex = v1.dev_diffuseTex;
+  targetFragment.diffuseTexWidth = v1.diffuseTexWidth;
+  targetFragment.diffuseTexHeight = v1.diffuseTexHeight;
 
   const int minDepth = atomicMin(&depth[pixelIndex], fragmentIntegerDepth);
 
@@ -970,7 +990,7 @@ __global__ void _rasterizer(int numPrimitives, Primitive* dev_primitives, int sc
     for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue) {
       const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
       const int pixelIndex = xValue + (yValue * screenWidth);
-      TryStoreFragment(xValue, yValue, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
+      TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
     }
   }
 #endif
@@ -997,7 +1017,7 @@ __global__ void _rasterizer(int numPrimitives, Primitive* dev_primitives, int sc
       }
 
       const int pixelIndex = xValue + (yValue * screenWidth);
-      TryStoreFragment(xValue, yValue, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
+      TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
     }
   }
 #endif
