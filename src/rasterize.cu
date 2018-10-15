@@ -719,10 +719,14 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 		vertices[2] = glm::vec3(p.v[2].pos);
 		AABB box = getAABBForTriangle(vertices);
 		// clamp the bounds
-		int minHeight = fmaxf(0, (int)box.min.y);
+		/*int minHeight = fmaxf(0, (int)box.min.y);
 		int minWidth = fmaxf(0, (int)box.min.x);
 		int maxHeight = fminf(height, (int)box.max.y + 1);
-		int maxWidth = fminf(width, (int)box.max.x + 1);
+		int maxWidth = fminf(width, (int)box.max.x + 1);*/
+		int minHeight = (int)box.min.y;
+		int minWidth = (int)box.min.x;
+		int maxHeight = (int)box.max.y + 1;
+		int maxWidth = (int)box.max.x + 1;
 
 		// loop over all pixels of p's AABB to see if it's in p
 		for (int j = minHeight; j < maxHeight; j++) {
@@ -734,10 +738,12 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 				// if it is, store p's value into the pixel
 				if (isBarycentricCoordInBounds(baryCoor)) {
 					// check for depth
-					
+					int near = -1;
+					int far = 10;
+					//float depth = (-getZAtCoordinate(baryCoor, vertices) - near) / (far - near); // let's say near clip is at -1 and far is at 10
 					float depth = getZAtCoordinate(baryCoor, vertices);
-					//int& intDepth = reinterpret_cast<int&>(depth);
-					int intDepth = -depth * INT_MAX;
+					int& intDepth = reinterpret_cast<int&>(depth);
+					//int intDepth = depth * INT_MAX;
 
 					if (intDepth < atomicMin(&dev_depth[fidx], intDepth)) {
 						Fragment& frag = dev_fragmentBuffer[fidx];
