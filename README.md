@@ -29,6 +29,12 @@ point|line|triangle
 ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/p.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/line.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/lamm.gif)
 
 
+corrected|non-corrected
+-----|----
+![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/yes.gif) | ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/non.gif)
+
+
+
 
 ### Credits
 
