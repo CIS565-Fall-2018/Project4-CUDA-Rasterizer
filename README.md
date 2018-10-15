@@ -23,16 +23,19 @@ A list of features implemented in this project is as follows:
 
 ## Results ##
 **Screen recording of running program with lambert shading and point light**
+
 | duck.gltf | CesiumMilkTruck.gltf |
 |------|------|
 | ![](renders/demo.gif) |![](renders/demo_2.gif) |
 
 **Render depth and normals**
+
 | depth | normal |
 |------|------|
 | ![](renders/depth.png) | ![](renders/normals.png) |
 
 **Texture mapping and lambert shading**
+
 | plain color | lambert shading |
 |------|------|
 | ![](renders/duck_plain.png) | ![](renders/duck_lambert.png) |
@@ -42,16 +45,19 @@ A list of features implemented in this project is as follows:
 | ![](renders/truck_plain.png) | ![](renders/truck_lambert.png) |
 
 **Render texture w/o bilinear texture filtering**
+
 | no bilinear filtering | with bilinear filtering |
 |------|------|
 | ![](renders/no_bilinear.png) | ![](renders/bilinear.png) |
 
 **Back face culling**
+
 | render front face | render back face |
 |------|------|
 | ![](renders/frontface.png) | ![](renders/backface.png) |
 
 **Render points and lines**
+
 | render points | render lines |
 |------|------|
 | ![](renders/points.png) | ![](renders/lines.png) |
