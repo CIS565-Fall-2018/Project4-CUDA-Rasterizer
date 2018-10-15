@@ -176,8 +176,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, cons
 
         float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, light), 0.f, 1.f);
 
-        //framebuffer[index] = fragmentBuffer[index].color * lambert;
-        framebuffer[index] = fragmentBuffer[index].color + 0.15f;
+        framebuffer[index] = fragmentBuffer[index].color * lambert;
+        //framebuffer[index] = fragmentBuffer[index].color + 0.15f;
     }
 }
 
@@ -811,8 +811,8 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                                     uv[1] = glm::vec3(p.v[1].texcoord0, 0);
                                     uv[2] = glm::vec3(p.v[2].texcoord0, 0);
 
-                                    glm::vec3 final_uv = perspectiveCorrectInterpolation(eyeTri, z, uv, bary);
-
+                                    //glm::vec3 final_uv = perspectiveCorrectInterpolation(eyeTri, z, uv, bary);
+                                    glm::vec2 final_uv = bary[0] * p.v[0].texcoord0 + bary[1] * p.v[1].texcoord0 + bary[2] * p.v[2].texcoord0;
                                     float u = final_uv.x * p.v[0].texWidth;
                                     float v = final_uv.y * p.v[0].texHeight;
 
@@ -846,7 +846,7 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
 #else
                                     glm::vec3 final_col = glm::vec3(tex[(u_i + (v_i * p.v[0].texWidth)) * 3],
                                                                     tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 1],
-                                                                    tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 2]);
+                                                                    tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 2]) / 255.f;
 #endif
                                 
 
