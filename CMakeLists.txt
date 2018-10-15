@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.1)
 project(cis565_rasterizer)
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fpermissive")
 
 # Set up include and lib paths
 include_directories(.)
@@ -48,9 +49,9 @@ set(CUDA_PROPAGATE_HOST_FLAGS OFF)
 set(CMAKE_CXX_FLAGS_DEBUG                 "-O0 -g")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO        "-O2 -g")
 set(CMAKE_CXX_FLAGS_RELEASE               "-O3    -DNDEBUG")
-list(APPEND CUDA_NVCC_FLAGS_DEBUG          -O0 -g -G)
-list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO -O2 -g -lineinfo)
-list(APPEND CUDA_NVCC_FLAGS_RELEASE        -O3    -DNDEBUG)
+list(APPEND CUDA_NVCC_FLAGS_DEBUG          -O0 -g -G -std=c++11)
+list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO -O2 -g -lineinfo -std=c++11)
+list(APPEND CUDA_NVCC_FLAGS_RELEASE        -O3    -DNDEBUG -std=c++11)
 if (WIN32)
     set(CUDA_PROPAGATE_HOST_FLAGS ON)
     set(CMAKE_CXX_FLAGS                       "/MD /EHsc /D _CRT_SECURE_NO_WARNINGS")
@@ -95,6 +96,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     util
     #stream_compaction  # TODO: uncomment if using your own stream compaction
     ${CORELIBS}
+    X11
     )
 
 add_custom_command(
