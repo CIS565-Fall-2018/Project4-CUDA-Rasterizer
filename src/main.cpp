@@ -17,7 +17,7 @@
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
-
+int starttime;
 int main(int argc, char **argv) {
     if (argc != 2) {
         cout << "Usage: [gltf file]. Press Enter to exit" << endl;
@@ -57,6 +57,7 @@ int main(int argc, char **argv) {
     // Launch CUDA/GL
     if (init(scene)) {
         // GLFW main loop
+		starttime = GetTickCount();
         mainLoop();
     }
 
@@ -97,16 +98,18 @@ void mainLoop() {
 //---------RUNTIME STUFF---------
 //-------------------------------
 float scale = 1.0f;
-float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
+float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.f;
 float x_angle = 0.0f, y_angle = 0.0f;
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
     dptr = NULL;
+	int timert = GetTickCount() - starttime;
 
+	y_angle = 0.001*timert;
 	glm::mat4 P = glm::frustum<float>(-scale * ((float)width) / ((float)height),
 		scale * ((float)width / (float)height),
-		-scale, scale, 1.0, 1000.0);
+		-scale, scale, 3, 1000.0);
 
 	glm::mat4 V = glm::mat4(1.0f);
 
@@ -138,8 +141,8 @@ bool init(const tinygltf::Scene & scene) {
         return false;
     }
 
-    width = 800;
-    height = 800;
+    width = 1000;
+    height = 1000;
     window = glfwCreateWindow(width, height, "CIS 565 Pathtracer", NULL, NULL);
     if (!window) {
         glfwTerminate();
@@ -382,13 +385,13 @@ void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 	if (mouseState == ROTATE)
 	{
 		//rotate
-		x_angle += (float)s_r * diffy;
+		x_angle += -(float)s_r * diffy;
 		y_angle += (float)s_r * diffx;
 	}
 	else if (mouseState == TRANSLATE)
 	{
 		//translate
-		x_trans += (float)(s_t * diffx);
+		x_trans += (float)(-s_t * diffx);
 		y_trans += (float)(-s_t * diffy);
 	}
 }
