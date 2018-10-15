@@ -10,6 +10,26 @@ CUDA Rasterizer
 
 ## CUDA Rasterizer
 
+### Shading Methods
+| Lambert        | Blinn-Phong            |
+| ------------- |:-------------:|
+| ![](images/lambert.png)      | ![](images/blinn.png)   |
+
+### Perspective correct texture 
+
+| Non-perspective correct        | Perspective correct             |
+| ------------- |:-------------:|
+| ![](images/nonperspective.gif)      | ![](images/perspective.gif)   |
+
+### Bilinear texture filtering
+| Non-bilinear       | Bilinear  texture filtering            |
+| ------------- |:-------------:|
+| ![](images/nobilinear.png)      | ![](images/bilinear.png)   |
+
+### Rasterize point and line
+| Point cloud       | Wireframe            |
+| ------------- |:-------------:|
+| ![](images/point.gif)      | ![](images/line.gif)   |
 
 ### Credits
 
