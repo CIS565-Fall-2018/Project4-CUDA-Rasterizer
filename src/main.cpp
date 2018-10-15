@@ -18,8 +18,11 @@
 //-------------MAIN--------------
 //-------------------------------
 
+//scenes cuz i'm lazy (instead of parsing each primitive)
+std::vector<tinygltf::Scene> scenes;
+
 int main(int argc, char **argv) {
-    if (argc != 2) {
+    if (argc == 1) {
         cout << "Usage: [gltf file]. Press Enter to exit" << endl;
 		getchar();
         return 0;
@@ -28,26 +31,31 @@ int main(int argc, char **argv) {
 	tinygltf::Scene scene;
 	tinygltf::TinyGLTFLoader loader;
 	std::string err;
-	std::string input_filename(argv[1]);
-	std::string ext = getFilePathExtension(input_filename);
+	std::vector<std::string> filenames(argv + 1, argv + argc);
+	for(auto& input_filename : filenames)
+	{
+	  std::string ext = getFilePathExtension(input_filename);
 
-	bool ret = false;
-	if (ext.compare("glb") == 0) {
-		// assume binary glTF.
-		ret = loader.LoadBinaryFromFile(&scene, &err, input_filename.c_str());
-	} else {
-		// assume ascii glTF.
-		ret = loader.LoadASCIIFromFile(&scene, &err, input_filename.c_str());
+	  bool ret = false;
+	  if (ext.compare("glb") == 0) {
+		  // assume binary glTF.
+		  ret = loader.LoadBinaryFromFile(&scene, &err, input_filename.c_str());
+	  } else {
+		  // assume ascii glTF.
+		  ret = loader.LoadASCIIFromFile(&scene, &err, input_filename.c_str());
+	  }
+	  if (!ret) {
+		  printf("Failed to parse glTF: %s\n", input_filename.c_str());
+		  return -1;
+	  }
+	  //push our scene back
+	  scenes.emplace_back(scene);
 	}
 
 	if (!err.empty()) {
 		printf("Err: %s\n", err.c_str());
 	}
 
-	if (!ret) {
-		printf("Failed to parse glTF\n");
-		return -1;
-	}
 
 
     frame = 0;
@@ -99,28 +107,74 @@ void mainLoop() {
 float scale = 1.0f;
 float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
 float x_angle = 0.0f, y_angle = 0.0f;
-void runCuda() {
+
+//camera stuff
+glm::vec3 camera_pos = glm::vec3(0.0f, 0.0f, 5.0f);
+glm::vec3 camera_front = glm::vec3(0.0f, 0.0f, -1.0f);
+glm::vec3 camera_up = glm::vec3(0.0f, 1.0f, 0.0f);
+float camera_speed = 0.10f;
+
+void runCuda()
+{
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
     dptr = NULL;
 
-	glm::mat4 P = glm::frustum<float>(-scale * ((float)width) / ((float)height),
-		scale * ((float)width / (float)height),
-		-scale, scale, 1.0, 1000.0);
+    //movement
+    if (glfwGetKey(window, GLFW_KEY_W)) 
+    {
+        camera_pos += camera_speed * camera_front;
+    }
+    if (glfwGetKey(window, GLFW_KEY_S)) 
+    {
+    	camera_pos -= camera_speed * camera_front;
+    }
+    if (glfwGetKey(window, GLFW_KEY_D)) 
+    {
+    	camera_pos -= glm::normalize(glm::cross(camera_front, camera_up)) * camera_speed;
+    }
+    if (glfwGetKey(window, GLFW_KEY_A)) 
+    {   
+      	camera_pos += glm::normalize(glm::cross(camera_front, camera_up)) * camera_speed;
+    }
 
-	glm::mat4 V = glm::mat4(1.0f);
+    //don't move up or down
+    camera_pos.y = 0.0f;
 
-	glm::mat4 M =
-		glm::translate(glm::vec3(x_trans, y_trans, z_trans))
-		* glm::rotate(x_angle, glm::vec3(1.0f, 0.0f, 0.0f))
-		* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f));
+	// glm::mat4 P = glm::frustum<float>(-scale * ((float)width) / ((float)height),
+	// 	scale * ((float)width / (float)height),
+	// 	-scale, scale, 1.0, 1000.0);
+ //
+	// glm::mat4 V = glm::mat4(1.0f);
+ //
+	// glm::mat4 M =
+	// 	glm::translate(glm::vec3(x_trans, y_trans, z_trans))
+	// 	* glm::rotate(x_angle, glm::vec3(1.0f, 0.0f, 0.0f))
+	// 	* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f));
+
+
+    cudaGLMapBufferObject((void **)&dptr, pbo);
+
+    objects[1].transformation = glm::vec3(0.0f, 3.0f, -10.0f);
+
+    for(int i = 0; i < objects.size(); i++)
+    {
+	//grab current object and set the scene
+	ObjectData& object_data = objects[i];
+    	set_scene(i);
+
+    	glm::mat4 P = glm::perspective(glm::radians(45.0f), static_cast<float>(width) / static_cast<float>(height), 1.0f,
+	                               1000.0f);
+	glm::mat4 V = glm::lookAt(camera_pos, camera_pos + camera_front, camera_up);
+
+	glm::mat4 M = glm::translate(object_data.transformation);
 
 	glm::mat3 MV_normal = glm::transpose(glm::inverse(glm::mat3(V) * glm::mat3(M)));
 	glm::mat4 MV = V * M;
 	glm::mat4 MVP = P * MV;
 
-    cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal);
+	rasterize(dptr, MVP, MV, MV_normal, camera_pos);
+    }
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
@@ -180,8 +234,11 @@ bool init(const tinygltf::Scene & scene) {
 		}
 	}
 
-
-	rasterizeSetBuffers(scene);
+	//set scenes here
+    for(auto& s : scenes)
+    {
+	rasterizeSetBuffers(s); 
+    }
 
     GLuint passthroughProgram;
     passthroughProgram = initShader();
