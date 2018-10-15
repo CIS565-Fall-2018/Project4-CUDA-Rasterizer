@@ -673,6 +673,16 @@ void _vertexTransformAndAssembly(
     // Then divide the pos by its w element to transform into NDC space
     // Finally transform x and y to viewport space
 
+    const glm::vec3 devicePosition = primitive.dev_position[vid];
+    glm::vec4 screenPosition = MVP * glm::vec4(devicePosition, 1.0f);     // CLIP SPACE
+    screenPosition /= screenPosition.w;                                   // NDC SPACE
+    screenPosition.x = 0.5f * width * (1.0f + screenPosition.x);          // VIEWPORT SPACE
+    screenPosition.y = 0.5f * height * (1.0f - screenPosition.y);
+
+    primitive.dev_verticesOut[vid].pos = screenPosition;
+    primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(devicePosition, 1.0f));
+    primitive.dev_verticesOut[vid].eyeNor = MV_normal * primitive.dev_normal[vid];
+
     // TODO: Apply vertex assembly here
     // Assemble all attribute arraies into the primitive array
   }
@@ -681,9 +691,7 @@ void _vertexTransformAndAssembly(
 
 static int curPrimitiveBeginId = 0;
 
-__global__
-
-void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_primitives,
+__global__ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_primitives,
                         PrimitiveDevBufPointers primitive)
 {
   // index id
@@ -694,16 +702,285 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
     // TODO: uncomment the following code for a start
     // This is primitive assembly for triangles
 
-    //int pid;	// id for cur primitives vector
-    //if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-    //	pid = iid / (int)primitive.primitiveType;
-    //	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-    //		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-    //}
+    int pid;	// id for cur primitives vector
+    if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+    	pid = iid / (int)primitive.primitiveType;
+    	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+    		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+    }
 
 
     // TODO: other primitive types (point, line)
   }
+}
+
+__device__ void ClampRange(float& actualStart, float& actualEnd, float targetStart, float targetEnd) {
+  if (actualStart < targetStart) {
+    actualStart = targetStart;
+  }
+
+  if (actualEnd > targetEnd) {
+    actualEnd = targetEnd;
+  }
+}
+
+__device__ void ClampRangeInt(int& actualStart, int& actualEnd, int targetStart, int targetEnd) {
+  if (actualStart < targetStart) {
+    actualStart = targetStart;
+  }
+
+  if (actualEnd > targetEnd) {
+    actualEnd = targetEnd;
+  }
+}
+
+__device__ bool CheckLineSegmentIntersect(glm::vec2 startPoint, glm::vec2 endPoint, int c, float slope, float* xCoord) {
+  /*----------  Slope 0 Check  ----------*/
+  if (slope > -EPSILON && slope < EPSILON) {
+    return false;
+  }
+
+  float yIntercept = static_cast<float>(c);
+
+  // Incoming Line: y = c
+  float y1 = startPoint.y;
+  float y2 = endPoint.y;
+
+  float maxY = y1 > y2 ? y1 : y2;
+  float minY = y1 > y2 ? y2 : y1;
+
+  if (yIntercept <= minY) {
+    return false;
+  }
+
+  if (yIntercept > maxY) {
+    return false;
+  }
+
+  if (slope == INFINITY) {
+    (*xCoord) = startPoint.x;
+    return true;
+  }
+
+  // y = m(x - p1.x) + p1.y
+  //  Solve for y = c
+  float x = ((yIntercept - startPoint.y) / slope) + startPoint.x;
+  (*xCoord) = x;
+  return true;
+}
+
+__device__ float GetLineSegmentSlope(const glm::vec2& startPoint, const glm::vec2& endPoint)
+{
+  // x2 - x1
+  const float denom = endPoint[0] - startPoint[0];
+
+  // y2 - y1
+  const float num = endPoint[1] - startPoint[1];
+
+  if (denom > -EPSILON && denom < EPSILON) {
+    return INFINITY;
+  }
+
+  const float slope = num / denom;
+  return slope;
+}
+
+__device__ bool BoundingBoxContains(const BoundingBox& box, float x, float y) {
+  if (x < box.min.x - EPSILON || x > box.max.x + EPSILON) {
+    return false;
+  }
+
+  if (y < box.min.y - EPSILON || y > box.max.y + EPSILON) {
+    return false;
+  }
+
+  return true;
+}
+
+
+__device__ bool CalculateIntersection(const glm::vec2& p0,
+    const glm::vec2& p1,
+    const glm::vec2& p2,
+    float slope0,
+    float slope1,
+    float slope2,
+    const BoundingBox& box,
+    float& startX,
+    float& endX,
+    int yIntercept
+  ) {
+
+  float xResult1 = 0.0f;
+  float xResult2 = 0.0f;
+
+  float x1 = 0.0f;
+  float x2 = 0.0f;
+  float x3 = 0.0f;
+
+  const bool result1 = CheckLineSegmentIntersect(p0, p1, yIntercept, slope0, &x1);
+  const bool result2 = CheckLineSegmentIntersect(p1, p2, yIntercept, slope1, &x2);
+  const bool result3 = CheckLineSegmentIntersect(p2, p0, yIntercept, slope2, &x3);
+
+  int pointsCount = 0;
+
+  if (result1 && BoundingBoxContains(box, x1, yIntercept)) {
+    pointsCount++;
+    xResult1 = x1;
+  }
+
+  if (result2 && BoundingBoxContains(box, x2, yIntercept)) {
+    pointsCount++;
+
+    if (pointsCount == 2) {
+      xResult2 = x2;
+    } else {
+      xResult1 = x2;
+    }
+  }
+
+  if (result3 && BoundingBoxContains(box, x3, yIntercept)) {
+    pointsCount++;
+    xResult2 = x3;
+  }
+
+  if (pointsCount == 2) {
+    startX = xResult1 > xResult2 ? xResult2 : xResult1;
+    endX = xResult1 > xResult2 ? xResult1 : xResult2;
+
+    startX = ceil(startX);
+    endX = floor(endX);
+
+    return true;
+  }
+
+  return false;
+}
+
+__device__ void TryStoreFragment(float xCoord, int yCoord, const VertexOut& v1, const VertexOut& v2, const VertexOut& v3, const glm::vec3& baryCoordinates, int pixelIndex, int* depth, Fragment* fragmentBuffer) {
+  const float ratio1 = baryCoordinates.x;
+  const float ratio2 = baryCoordinates.y;
+  const float ratio3 = baryCoordinates.z;
+
+  // pos[2] holds NDC Z [0,1]
+  const float fragmentDepth = 1.0f / ((ratio1 * (1.0f / v1.pos[2])) + (ratio2 * (1.0f / v2.pos[2])) +(ratio3 * (1.0f / v3.pos[2])));
+  const int fragmentIntegerDepth = fragmentDepth * INT_MAX;
+
+  //const glm::vec3 vertexOutColor = fragmentDepth * ((ratio1 * (colorP1 / z1)) + (ratio2 * (colorP2 / z2)) +
+  //  (ratio3 * (colorP3 / z3)));;
+
+ 
+  //color = Triangle::BaryInterpolateColor(v1, v2, v3, targetPoint);
+
+  //color = AddLighting(color, v1, v2, v3, targetPoint);
+
+  //color = color * 255.0f;
+
+  //int idx = ToLinearCoords(xCoord, yCoord);
+  //Fragment frag = m_fragments[idx];
+
+  Fragment targetFragment;
+  targetFragment.color = glm::vec3(1,0,0);
+
+  const int minDepth = atomicMin(&depth[pixelIndex], fragmentIntegerDepth);
+
+  if (minDepth != fragmentIntegerDepth) {
+    depth[pixelIndex] = fragmentIntegerDepth;
+    fragmentBuffer[pixelIndex] = targetFragment;
+  }
+  //
+  // if (frag.m_isActive && frag.m_depth > fragmentDepth) {
+  //   m_fragments[idx] = Fragment(fragmentDepth, color);
+  // } else if (!frag.m_isActive) {
+  //   m_fragments[idx] = Fragment(fragmentDepth, color);
+  // }
+
+  // Old Draw Commands
+  // QRgb value = qRgb(color[0], color[1], color[2]);
+  // m_renderTarget.setPixel(ceil(k), ceil(rowY), value);
+}
+
+// #define USE_LINE_SEGMENT_CHECK
+#define USE_BARY_CHECK
+
+__global__ void _rasterizer(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth, Fragment* fragmentBuffer)
+{
+  // primitive id
+  int primtiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+  if (primtiveId >= numPrimitives)
+  {
+
+    return;
+  }
+
+  const Primitive& target = dev_primitives[primtiveId];
+
+  // if (target.primitiveType == Triangle)
+  // {
+  const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+  const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
+  const glm::vec2 p2 = glm::vec2(target.v[2].pos[0], target.v[2].pos[1]);
+
+  const BoundingBox boundingBox = getBoundingBoxForTriangle(p0, p1, p2);
+
+#ifdef USE_LINE_SEGMENT_CHECK
+  int rasterStartY = floor(boundingBox.min.y);
+  int rasterEndY = ceil(boundingBox.max.y);
+  ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+
+  const float slope0 = GetLineSegmentSlope(p0, p1);
+  const float slope1 = GetLineSegmentSlope(p1, p2);
+  const float slope2 = GetLineSegmentSlope(p2, p0);
+
+  for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
+
+
+    float rasterStartX = 0;
+    float rasterEndX = 0;
+
+    const bool result = CalculateIntersection(p0, p1, p2, slope0, slope1, slope2, boundingBox, rasterStartX, rasterEndX, yValue);
+
+    if (!result) {
+      continue;
+    }
+
+    ClampRange(rasterStartX, rasterEndX, 0, screenWidth - 1);
+
+    for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue) {
+      const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
+      const int pixelIndex = xValue + (yValue * screenWidth);
+      TryStoreFragment(xValue, yValue, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
+    }
+  }
+#endif
+
+#ifdef USE_BARY_CHECK
+  int rasterStartX = floor(boundingBox.min.x);
+  int rasterEndX = ceil(boundingBox.max.x);
+
+  ClampRangeInt(rasterStartX, rasterEndX, 0, screenWidth - 1);
+
+  for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue) {
+
+    int rasterStartY = floor(boundingBox.min.y);
+    int rasterEndY = ceil(boundingBox.max.y);
+    ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+
+    for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
+
+      const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
+
+      if (!isBarycentricCoordInBounds(baryCoordinates))
+      {
+        continue;
+      }
+
+      const int pixelIndex = xValue + (yValue * screenWidth);
+      TryStoreFragment(xValue, yValue, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
+    }
+  }
+#endif
+// }
 }
 
 
@@ -721,48 +998,48 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
   // (See README for rasterization pipeline outline.)
 
   // Vertex Process & primitive assembly
+  curPrimitiveBeginId = 0;
+  dim3 numThreadsPerBlock(128);
+
+  auto it = mesh2PrimitivesMap.begin();
+  auto itEnd = mesh2PrimitivesMap.end();
+
+  for (; it != itEnd; ++it)
   {
-    curPrimitiveBeginId = 0;
-    dim3 numThreadsPerBlock(128);
-
-    auto it = mesh2PrimitivesMap.begin();
-    auto itEnd = mesh2PrimitivesMap.end();
-
-    for (; it != itEnd; ++it)
+    auto p = (it->second).begin(); // each primitive
+    auto pEnd = (it->second).end();
+    for (; p != pEnd; ++p)
     {
-      auto p = (it->second).begin(); // each primitive
-      auto pEnd = (it->second).end();
-      for (; p != pEnd; ++p)
-      {
-        dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
-        dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+      dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+      dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
-        _vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(
-          p->numVertices, *p, MVP, MV, MV_normal, width, height);
-        checkCUDAError("Vertex Processing");
-        cudaDeviceSynchronize();
-        _primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
-        (p->numIndices,
-         curPrimitiveBeginId,
-         dev_primitives,
-         *p);
-        checkCUDAError("Primitive Assembly");
+      _vertexTransformAndAssembly <<< numBlocksForVertices, numThreadsPerBlock >>>(
+        p->numVertices, *p, MVP, MV, MV_normal, width, height);
+      checkCUDAError("Vertex Processing");
+      cudaDeviceSynchronize();
+      _primitiveAssembly <<< numBlocksForIndices, numThreadsPerBlock >>>
+      (p->numIndices,
+       curPrimitiveBeginId,
+       dev_primitives,
+       *p);
+      checkCUDAError("Primitive Assembly");
 
-        curPrimitiveBeginId += p->numPrimitives;
-      }
+      curPrimitiveBeginId += p->numPrimitives;
     }
-
-    checkCUDAError("Vertex Processing and Primitive Assembly");
   }
 
+  checkCUDAError("Vertex Processing and Primitive Assembly");
+
   cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
-  initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
+  initDepth <<<blockCount2d, blockSize2d >>>(width, height, dev_depth);
 
   // TODO: rasterize
-
+  const int blockSize1d = 512;
+  dim3 numRasterizeBlocks = (curPrimitiveBeginId + blockSize1d - 1) / blockSize1d;
+  _rasterizer <<< numRasterizeBlocks, blockSize1d >>> (curPrimitiveBeginId, dev_primitives, width, height, dev_depth, dev_fragmentBuffer);
 
   // Copy depthbuffer colors into framebuffer
-  render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
+  render <<< blockCount2d, blockSize2d >>>(width, height, dev_fragmentBuffer, dev_framebuffer);
   checkCUDAError("fragment shader");
   // Copy framebuffer into OpenGL buffer for OpenGL previewing
   sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
