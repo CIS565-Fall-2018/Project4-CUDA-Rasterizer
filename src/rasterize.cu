@@ -23,7 +23,7 @@
 
 #define LAMBERT_SHADING 1
 #define BLINN_PHONG_SHADING 1
-#define BACKFACE_CULLING 1
+//#define BACKFACE_CULLING 1
 #define BILINEAR_FILTERING 1
 
 //happens by default now since added check
@@ -88,9 +88,9 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer, glm:
     glm::vec3 eye_pos = fragmentBuffer[index].eyePos;
     glm::vec3 eye_normal = fragmentBuffer[index].eyeNor;
 
-    framebuffer[index] = fragmentBuffer[index].color;
-    
-    // TODO: add your fragment shader code here
+    glm::vec3 pixel_color = fragmentBuffer[index].color;
+
+    // TODO: adsd your fragment shader code here
 #ifdef LAMBERT_SHADING
     for(int i = 0; i < num_lights; i++)
     {
@@ -102,9 +102,15 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer, glm:
       glm::vec3 half_direction = glm::normalize(light_direction + eye_direction);
       amount_of_light = glm::pow(glm::max(glm::dot(light_direction, half_direction), 0.0f), 8.0f);
 #endif
-      framebuffer[index] += fragmentBuffer[index].color * amount_of_light;
+      pixel_color += fragmentBuffer[index].color * amount_of_light;
     }
 #endif
+
+    //hack to get multiple objects to work (check if don't overwrite if not black) DOESN"T CHECK FOR DEPTH BUFFER...
+    if(framebuffer[index] == glm::vec3(0.0f))
+    {
+      framebuffer[index] = pixel_color;
+    }
   }
 }
 
@@ -869,15 +875,19 @@ __global__ void rasterize_triangles(int totalPrimitives, int width, int height, 
   }
 }
 
+int sideLength2d = 8;
+dim3 blockSize2d(sideLength2d, sideLength2d);
+dim3 blockCount2d((width - 1) / blockSize2d.x + 1,
+                  (height - 1) / blockSize2d.y + 1);
+
 /**
  * Perform rasterization.
  */
 void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm::mat3 MV_normal, glm::vec3& camera_pos)
 {
-  int sideLength2d = 8;
-  dim3 blockSize2d(sideLength2d, sideLength2d);
-  dim3 blockCount2d((width - 1) / blockSize2d.x + 1,
-                    (height - 1) / blockSize2d.y + 1);
+  blockCount2d = dim3((width - 1) / blockSize2d.x + 1,
+                  (height - 1) / blockSize2d.y + 1);
+
   // Execute your rasterization pipeline here
   // (See README for rasterization pipeline outline.)
   // Vertex Process & primitive assembly
@@ -943,6 +953,15 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
   render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, dev_lights, num_lights, camera_pos_in_MV);
   checkCUDAError("fragment shader");
 
+}
+
+void zero_frame_buffer()
+{
+  cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
+}
+
+void write_to_pbo(uchar4* pbo)
+{
   // Copy framebuffer into OpenGL buffer for OpenGL previewing
   sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
   checkCUDAError("copy render result to pbo");

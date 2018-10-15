@@ -98,6 +98,7 @@ struct ObjectData {
   Primitive *dev_primitives = NULL;
   bool is_copy = false;
   glm::vec3 transformation = {0.0f, 0.0f, -10.0f};
+  bool is_deleted = false;
 };
 
 extern std::vector<ObjectData> objects;
@@ -110,5 +111,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 &MVP, const glm::mat4 &MV,
 void rasterizeFree();
 
 void set_scene(int index);
+void copy_object(int index);
+
+void zero_frame_buffer();
 
 void write_to_pbo(uchar4* pbo);

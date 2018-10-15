@@ -13,6 +13,10 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYGLTF_LOADER_IMPLEMENTATION
 #include <util/tiny_gltf_loader.h>
+#include <random>
+
+//#define CUDA_STRIKE 1
+const int object_copies = 10;
 
 //-------------------------------
 //-------------MAIN--------------
@@ -112,6 +116,7 @@ float x_angle = 0.0f, y_angle = 0.0f;
 glm::vec3 camera_pos = glm::vec3(0.0f, 0.0f, 5.0f);
 glm::vec3 camera_front = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 camera_up = glm::vec3(0.0f, 1.0f, 0.0f);
+glm::vec3 camera_right = glm::normalize(glm::cross(camera_front, camera_up));
 float camera_speed = 0.10f;
 
 void runCuda()
@@ -131,31 +136,46 @@ void runCuda()
     }
     if (glfwGetKey(window, GLFW_KEY_D)) 
     {
-    	camera_pos -= glm::normalize(glm::cross(camera_front, camera_up)) * camera_speed;
+    	camera_pos -= camera_right * camera_speed;
     }
     if (glfwGetKey(window, GLFW_KEY_A)) 
     {   
-      	camera_pos += glm::normalize(glm::cross(camera_front, camera_up)) * camera_speed;
+      	camera_pos += camera_right * camera_speed;
     }
 
     //don't move up or down
     camera_pos.y = 0.0f;
 
-	// glm::mat4 P = glm::frustum<float>(-scale * ((float)width) / ((float)height),
-	// 	scale * ((float)width / (float)height),
-	// 	-scale, scale, 1.0, 1000.0);
- //
-	// glm::mat4 V = glm::mat4(1.0f);
- //
-	// glm::mat4 M =
-	// 	glm::translate(glm::vec3(x_trans, y_trans, z_trans))
-	// 	* glm::rotate(x_angle, glm::vec3(1.0f, 0.0f, 0.0f))
-	// 	* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f));
+#ifndef CUDA_STRIKE
 
-
+	//zero out frame buffer
+    zero_frame_buffer();
+	glm::mat4 P = glm::frustum<float>(-scale * ((float)width) / ((float)height),
+	 	scale * ((float)width / (float)height),
+	 	-scale, scale, 1.0, 1000.0);
+ 
+	 glm::mat4 V = glm::mat4(1.0f);
+ 
+	 glm::mat4 M =
+	 	glm::translate(glm::vec3(x_trans, y_trans, z_trans))
+	 	* glm::rotate(x_angle, glm::vec3(1.0f, 0.0f, 0.0f))
+	 	* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f));
+	glm::mat3 MV_normal = glm::transpose(glm::inverse(glm::mat3(V) * glm::mat3(M)));
+	glm::mat4 MV = V * M;
+	glm::mat4 MVP = P * MV;
     cudaGLMapBufferObject((void **)&dptr, pbo);
 
-    objects[1].transformation = glm::vec3(0.0f, 3.0f, -10.0f);
+	rasterize(dptr, MVP, MV, MV_normal, camera_pos);
+    
+    write_to_pbo(dptr);
+    cudaGLUnmapBufferObject(pbo);  
+#endif
+
+#ifdef CUDA_STRIKE
+    cudaGLMapBufferObject((void **)&dptr, pbo);
+
+	//zero out frame buffer
+    zero_frame_buffer();
 
     for(int i = 0; i < objects.size(); i++)
     {
@@ -163,11 +183,53 @@ void runCuda()
 	ObjectData& object_data = objects[i];
     	set_scene(i);
 
+	if(object_data.is_deleted)
+	{
+		//spawn
+		object_data.is_deleted = false;
+		std::mt19937 rng;
+		std::random_device rd{};
+		rng.seed(rd());
+		std::uniform_real_distribution<> dist(20.0f, 50.0f);
+		object_data.transformation = glm::vec3(dist(rng), 0.0f, -dist(rng));
+		//continue;
+	}
+
     	glm::mat4 P = glm::perspective(glm::radians(45.0f), static_cast<float>(width) / static_cast<float>(height), 1.0f,
 	                               1000.0f);
 	glm::mat4 V = glm::lookAt(camera_pos, camera_pos + camera_front, camera_up);
 
-	glm::mat4 M = glm::translate(object_data.transformation);
+	glm::vec3& object_transform = object_data.transformation;
+	glm::mat4 M;
+	glm::vec3 camera_to_object = camera_pos - object_transform;
+    	//M = glm::rotate(M, glm::atan(camera_to_object.y, glm::sqrt(camera_to_object.x * camera_to_object.x + camera_to_object.z * camera_to_object.z)), glm::vec3(0.0f, 1.0f, 0.0f));
+	//M = glm::scale(M, glm::vec3(1.0f));
+	//M = glm::translate(M, object_transform);
+
+	//move towards camera
+	if(glm::length(camera_to_object) > 15.0f)
+	{
+		object_transform += camera_to_object * 0.01f;
+		M = glm::translate(M, object_transform);
+	}
+
+    	//object look at camera
+    	M = glm::inverse(glm::lookAt(object_transform, camera_pos, camera_up));
+    	M = glm::rotate(M, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+	//check if hit (not accurate)
+	if(glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT))
+	{
+		float angle = glm::dot(camera_front, -camera_to_object);
+		//std::cout << angle << "\n";
+		float threshold = 0.2f;
+		float middle = 15.0f;
+		if(angle < threshold + middle  && angle > -threshold + middle)
+		{
+			//destroy object
+			object_data.is_deleted = true;
+		}
+	}
 
 	glm::mat3 MV_normal = glm::transpose(glm::inverse(glm::mat3(V) * glm::mat3(M)));
 	glm::mat4 MV = V * M;
@@ -175,7 +237,9 @@ void runCuda()
 
 	rasterize(dptr, MVP, MV, MV_normal, camera_pos);
     }
+    write_to_pbo(dptr);
     cudaGLUnmapBufferObject(pbo);
+#endif
 
     frame++;
     fpstracker++;
@@ -200,7 +264,11 @@ bool init(const tinygltf::Scene & scene) {
         return false;
     }
     glfwMakeContextCurrent(window);
-    glfwSetKeyCallback(window, keyCallback);
+#ifdef CUDA_STRIKE
+	glfwSetKeyCallback(window, keyCallback);
+#endif
+	//disable mouse
+     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     // Set up GL context
     glewExperimental = GL_TRUE;
@@ -238,6 +306,20 @@ bool init(const tinygltf::Scene & scene) {
     for(auto& s : scenes)
     {
 	rasterizeSetBuffers(s); 
+    }
+
+#ifdef CUDA_STRIKE
+    for(int i = 0; i < object_copies; i++)
+    {
+      copy_object(0);	    
+    }
+#endif
+
+    float i = 0.0f;
+    for(auto& object : objects)
+    {
+	    object.transformation += glm::vec3(i, 0.0f, 0.0f);
+	    i += 10.0f;
     }
 
     GLuint passthroughProgram;
@@ -426,6 +508,10 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 
 double lastx = (double)width / 2;
 double lasty = (double)height / 2;
+float yaw = -90.0f;
+float pitch = 0.0f;
+float sensitivity = 0.05;
+
 void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 {
 	const double s_r = 0.01;
@@ -435,6 +521,24 @@ void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 	double diffy = ypos - lasty;
 	lastx = xpos;
 	lasty = ypos;
+
+	//move in camera
+	diffx *= sensitivity;
+	diffy *= sensitivity;
+
+	yaw -= diffx;
+	pitch -= diffy;
+
+	pitch = glm::clamp<float>(pitch, -90.0f, 90.0f);
+	camera_front = 
+	  {
+	  	cos(glm::radians(yaw)) * cos(glm::radians(pitch)),
+		sin(glm::radians(pitch)),
+		sin(glm::radians(yaw)) * cos(glm::radians(pitch))
+	  };
+	camera_front = glm::normalize(camera_front);
+        camera_right = glm::normalize(glm::cross(camera_front, camera_up));
+        //camera_up = glm::normalize(glm::cross(camera_right, camera_front));
 
 	if (mouseState == ROTATE)
 	{
