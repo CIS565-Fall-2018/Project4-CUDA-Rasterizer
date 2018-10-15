@@ -64,6 +64,7 @@ namespace {
 
 		glm::vec3 eyePos;	// eye space position used for shading
 		glm::vec3 eyeNor;
+		glm::vec3 eyeLightDir;
 		// VertexAttributeTexcoord texcoord0;
 		// TextureData* dev_diffuseTex;
 		// ...
@@ -110,7 +111,7 @@ static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
-static float * dev_depth = NULL;	// you might need this buffer when doing depth test
+static int * dev_depth = NULL;	// you might need this buffer when doing depth test
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -144,7 +145,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     int index = x + (y * w);
 
     if (x < w && y < h) {
-        framebuffer[index] = fragmentBuffer[index].color;
+		float diffuseFactor = fmaxf(0.0f, glm::dot(fragmentBuffer[index].eyeNor, fragmentBuffer[index].eyeLightDir));
+		framebuffer[index] = fragmentBuffer[index].color *diffuseFactor;
 
 		// TODO: add your fragment shader code here
 		// compute diffuse color using Blinn or BlinnPhong
@@ -168,13 +170,13 @@ void rasterizeInit(int w, int h) {
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
-	cudaMalloc(&dev_depth, width * height * sizeof(float));
+	cudaMalloc(&dev_depth, width * height * sizeof(int));
 
 	checkCUDAError("rasterizeInit");
 }
 
 __global__
-void initDepth(int w, int h, float * depth)
+void initDepth(int w, int h, int * depth)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -182,7 +184,7 @@ void initDepth(int w, int h, float * depth)
 	if (x < w && y < h)
 	{
 		int index = x + (y * w);
-		depth[index] = 999999.0f; // TODO: fix this magic number
+		depth[index] = INT_MAX;
 	}
 }
 
@@ -644,11 +646,11 @@ void _vertexTransformAndAssembly(
 	int vid = (blockIdx.x * blockDim.x) + threadIdx.x;
 	if (vid < numVertices) {
 
-		// TODO: Apply vertex transformation here
+		// Vertex transformations
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
-		glm::vec3 vertexPos = primitive.dev_position[vid];
+		glm::vec4 vertexPos = glm::vec4(primitive.dev_position[vid], 1.0f);
 		glm::vec3 vertexNorm = primitive.dev_normal[vid];
-		glm::vec4 clipPos = MVP * glm::vec4(vertexPos, 1.0f);
+		glm::vec4 clipPos = MVP * vertexPos;
 		// Then divide the pos by its w element to transform into NDC space
 		clipPos /= clipPos.w;
 		// Finally transform x and y to viewport space
@@ -656,16 +658,23 @@ void _vertexTransformAndAssembly(
 		clipPos.y = 0.5f * (float)height * (1.0f - clipPos.y / clipPos.w);
 
 		// eye space
-		glm::vec3 eyeSpacePos = glm::vec3(MV * glm::vec4(vertexPos, 1.0f));
+		glm::vec3 eyeSpacePos = glm::vec3(MV * vertexPos);
 		glm::vec3 eyeSpaceNorm = glm::normalize(MV_normal * vertexNorm);
 
-		// TODO: Apply vertex assembly here
+		// Vertex assembly 
 		// Assemble all attribute arraies into the primitive array
 		VertexOut& vout = primitive.dev_verticesOut[vid];
 		vout.pos = clipPos;
 		vout.eyePos = eyeSpacePos;
 		vout.eyeNor = eyeSpaceNorm;
 		vout.col = glm::vec3(primitive.dev_materialColor);
+		//vout.col = glm::vec3(abs(vertexNorm.x), abs(vertexNorm.y), abs(vertexNorm.z)); // debug view for original normals
+		//vout.col = glm::vec3(abs(eyeSpaceNorm.x), abs(eyeSpaceNorm.y), abs(eyeSpaceNorm.z)); // debug view for eyespace normals
+
+
+		// TODO: read texture coordinates into the vertex
+		//vout.texcoord0 = primitive.dev_texcoord0[vid];
+		//vout.dev_diffuseTex = primitive.dev_diffuseTex;
 	}
 }
 
@@ -699,7 +708,7 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 
 __global__ 
-void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth, int numPrimitives, int width, int height) {
+void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer, int* dev_depth, int numPrimitives, int width, int height) {
 	int pidx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if (pidx < numPrimitives) {
@@ -709,24 +718,33 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 		vertices[1] = glm::vec3(p.v[1].pos);
 		vertices[2] = glm::vec3(p.v[2].pos);
 		AABB box = getAABBForTriangle(vertices);
+		// clamp the bounds
+		int minHeight = fmaxf(0, (int)box.min.y);
+		int minWidth = fmaxf(0, (int)box.min.x);
+		int maxHeight = fminf(height, (int)box.max.y + 1);
+		int maxWidth = fminf(width, (int)box.max.x + 1);
 
-		// loop over all pixels to see if it's in p
-		for (int j = (int)box.min.y; j < (int)box.max.y + 1; j++) {
-			for (int i = (int)box.min.x; i < (int)box.max.x + 1; i++) {
+		// loop over all pixels of p's AABB to see if it's in p
+		for (int j = minHeight; j < maxHeight; j++) {
+			for (int i = minWidth; i < maxHeight; i++) {
 				int fidx = j * width + i;
 				glm::vec2 fragmentPos = glm::vec2(i + 0.5, j + 0.5f);
 				glm::vec3 baryCoor = calculateBarycentricCoordinate(vertices, fragmentPos);
-				float depth = getZAtCoordinate(baryCoor, vertices);
 
 				// if it is, store p's value into the pixel
 				if (isBarycentricCoordInBounds(baryCoor)) {
 					// check for depth
-					if (depth < dev_depth[fidx]) {
-						dev_depth[fidx] = depth;
+					
+					float depth = getZAtCoordinate(baryCoor, vertices);
+					//int& intDepth = reinterpret_cast<int&>(depth);
+					int intDepth = -depth * INT_MAX;
+
+					if (intDepth < atomicMin(&dev_depth[fidx], intDepth)) {
 						Fragment& frag = dev_fragmentBuffer[fidx];
 						frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
 						frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
 						frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
+						frag.eyeLightDir = glm::normalize(glm::vec3(0, 100, 100) - frag.eyePos);
 					}
 				}
 			}
@@ -784,7 +802,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
-	// TODO: rasterize
+	// Rasterize
 	dim3 numThreadsPerBlock(128);
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 	rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, dev_depth, totalNumPrimitives, width, height);
