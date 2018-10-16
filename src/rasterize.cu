@@ -26,6 +26,7 @@
 #define OPTION_SSAA_GRID_SIZE 		2
 
 #define RANDOM_SEED					1337L
+#define SSAA_GRID_AREA				OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE
 
 namespace {
 
@@ -149,14 +150,35 @@ template <> __df__ double              maximum<double            >(double x, dou
 // From https://stackoverflow.com/a/24537113/3421536
 // See also: https://stackoverflow.com/a/25034092/3421536
 __device__
-int generateRandomInt(float A, float B, int idx) {
-	curandState state;
-	curand_init(RANDOM_SEED, idx, 0, &state);
-	float randu_f = curand_uniform(&state);
+int generateRandomInt(int A, int B, float randu_f) {
+	//float randu_f = curand_uniform(state);
 	randu_f *= (B-A+0.999999); // You should not use (B-A+1)*
 	randu_f += A;
 	int randu_int = __float2int_rz(randu_f);
+	//printf("RAND: %i <--%f \n", randu_int, randu_f);
+	if (randu_int > B || randu_int < A) {
+		printf("WARN: generateRandomInt out of bounds! %i -> [%i, %i]\n", randu_int, A, B);
+	}
 	return randu_int;
+}
+
+/**
+ * Handy-dandy hash function that provides seeds for random number generation.
+ */
+__host__ __device__ inline unsigned int utilhash(unsigned int a) {
+    a = (a + 0x7ed55d16) + (a << 12);
+    a = (a ^ 0xc761c23c) ^ (a >> 19);
+    a = (a + 0x165667b1) + (a << 5);
+    a = (a + 0xd3a2646c) ^ (a << 9);
+    a = (a + 0xfd7046c5) + (a << 3);
+    a = (a ^ 0xb55a4f09) ^ (a >> 16);
+    return a;
+}
+
+__host__ __device__
+thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth) {
+    int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
+    return thrust::default_random_engine(h);
 }
 
 /**
@@ -166,42 +188,43 @@ __global__
 void sendImageToPBO(uchar4 *pbo, int w, int h, int trueWidth, int trueHeight, glm::vec3 *image) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-    int index = x + (y * w);
+    int index = x + (y * trueWidth);
 
     if (x >= trueWidth || y >= trueHeight) { return; }
 
-    glm::vec3 color(0, 0, 0);
-
+    glm::vec3 color;
+    color.x = 0;
+    color.y = 0;
+    color.z = 0;
 #if OPTION_ENABLE_SSAA
     //Random SSAA
-    // Possible colors
-    int minX = x * OPTION_SSAA_GRID_SIZE;
-    int minY = (y * OPTION_SSAA_GRID_SIZE) * w;
-    int maxX = x * OPTION_SSAA_GRID_SIZE + OPTION_SSAA_GRID_SIZE - 1;
-    int maxY = (y * OPTION_SSAA_GRID_SIZE + OPTION_SSAA_GRID_SIZE - 1) * w;
+    thrust::default_random_engine rng =
+        			makeSeededRandomEngine(0, index, 1);
+    thrust::uniform_real_distribution<float> u01(0, 1);
 
-    glm::vec3 samples[OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE];
+    //Possible samples
+    glm::vec3 samples[SSAA_GRID_AREA];
     int i = 0;
-    //Fill array
-    for (int xIdx = minX; xIdx < maxX; xIdx++) {
-    	for (int yIdx = minY; yIdx < maxY; yIdx++) {
-    		int sampleIndex = xIdx + yIdx;
-    		samples[i] = image[sampleIndex];
+    for (int xOffset = 0; xOffset < OPTION_SSAA_GRID_SIZE; xOffset ++) {
+    	for (int yOffset = 0; yOffset < OPTION_SSAA_GRID_SIZE; yOffset ++) {
+    		int xIdx = xOffset + x * OPTION_SSAA_GRID_SIZE;
+    		int yIdx = (yOffset + y * OPTION_SSAA_GRID_SIZE) * w;
+    		int imageColorIdx = xIdx + yIdx;
+    		samples[i] = image[imageColorIdx];
     		i++;
     	}
     }
 
-    // Generate random samples and add randomly selected pixel
-    int randomIndex = 0;
-    for (i = 0; i < OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE; i++) {
-    	randomIndex = generateRandomInt(0, OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE, index);
-    	color += samples[randomIndex];
+    // Generate random samples and add randomly selected pixels
+    for (int i = 0; i < SSAA_GRID_AREA; i++){
+    	int randIdx = generateRandomInt(0, SSAA_GRID_AREA - 1, u01(rng));
+    	color.x += glm::clamp(samples[randIdx].x, 0.0f, 1.0f) * 255.0;
+    	color.y += glm::clamp(samples[randIdx].y, 0.0f, 1.0f) * 255.0;
+    	color.z += glm::clamp(samples[randIdx].z, 0.0f, 1.0f) * 255.0;
     }
+
     //Take the average
-    color /= (OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE);
-    color.x = glm::clamp(color.x, 0.0f, 1.0f) * 255.0;
-    color.y = glm::clamp(color.y, 0.0f, 1.0f) * 255.0;
-    color.z = glm::clamp(color.z, 0.0f, 1.0f) * 255.0;
+    color /= (float)SSAA_GRID_AREA;
 
 #else
     color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
@@ -209,6 +232,7 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, int trueWidth, int trueHeight, gl
     color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
 #endif
     // Each thread writes one pixel location in the texture (textel)
+    //if(color.x != 0 || color.y != 0 || color.z != 0) printf("COLOR: %f, %f, %f\n", color.x, color.y, color.z);
     pbo[index].w = 0;
     pbo[index].x = color.x;
     pbo[index].y = color.y;
@@ -914,6 +938,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
+	printf("TW, TH = %i, %i || %i, %i", trueWidth, trueHeight, width, height);
     sendImageToPBO<<<trueBlockCount2d, blockSize2d>>>(pbo, width, height, trueWidth, trueHeight, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
 }
