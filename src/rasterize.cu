@@ -779,7 +779,6 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 	glm::vec2 uv;
 
 	int z;
-	int old;
 	float z_float;
 
 	bool isSet = false;
@@ -792,7 +791,7 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 			inside = isBarycentricCoordInBounds(bary);
 
 			// depth buffer
-			z_float = -getZAtCoordinate(bary, tri);
+			z_float = 1 + getZAtCoordinate(bary, tri);
 			if (z_float < 0 || z_float > 1) continue;
 
 			z = z_float * INT_MAX;
@@ -809,9 +808,9 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 						// Critical section goes here.
 						// The critical section MUST be inside the wait loop;
 						// if it is afterward, a deadlock will occur.
-						atomicMin(depth + f_idx, z);
-						if (z == depth[f_idx]) {
+						if (z < depth[f_idx]) {
 
+							depth[f_idx] = z;
 							fragBuf[f_idx] = f_true;
 
 							// generate interpolated attributes
