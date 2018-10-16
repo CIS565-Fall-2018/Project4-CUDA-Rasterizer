@@ -814,10 +814,10 @@ void rasterizeByTile(Primitive* primitives, int* tilePrimitives, unsigned int* p
 
 		int tileOriginX = x * tilePixelSize;
 		int tileOriginY = y * tilePixelSize;
-		/*int* depthBuffer = (int*)malloc(tilePixelSize * tilePixelSize * sizeof(int));
+		int* depthBuffer = (int*)malloc(tilePixelSize * tilePixelSize * sizeof(int));
 		for (int i = 0; i < tilePixelSize * tilePixelSize; i++) {
 			depthBuffer[i] = INT_MAX;
-		}*/
+		}
 
 		/*for (int i = 0; i < tilePixelSize; i++) {
 			for (int j = 0; j < tilePixelSize; j++) {
@@ -856,20 +856,23 @@ void rasterizeByTile(Primitive* primitives, int* tilePrimitives, unsigned int* p
 					// if it is, store p's value into the pixel
 					if (isBarycentricCoordInBounds(baryCoor)) {
 						// check for depth
-						//float depth = -getZAtCoordinate(baryCoor, vertices) / 10.0f; // let's say near clip is at 0 and far is at 10
-						//int intDepth = depth * INT_MAX;
+						float depth = -getZAtCoordinate(baryCoor, vertices) / 10.0f; // let's say near clip is at 0 and far is at 10
+						int intDepth = depth * INT_MAX;
 
-						//if (intDepth < depthBuffer[i * tilePixelSize + j]) {
+						if (intDepth < depthBuffer[j * tilePixelSize + i]) {
+							depthBuffer[j * tilePixelSize + i] = intDepth;
 							Fragment& frag = fragmentBuffer[fidx];
 							frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
 							frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
 							frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
 							frag.eyeLightDir = glm::normalize(glm::vec3(0, 100, 100) - frag.eyePos);
-						//}
+						}
 					}
 				}
 			}
 		}
+
+		free(depthBuffer);
 	}
 }
 
