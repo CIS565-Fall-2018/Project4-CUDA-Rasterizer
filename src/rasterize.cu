@@ -19,8 +19,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <math.h>
+#include <curand_kernel.h>
 
 #define OPTION_ENABLE_LAMBERT		0
+#define OPTION_ENABLE_SSAA			1
+#define OPTION_SSAA_GRID_SIZE 		2
+
+#define RANDOM_SEED					1337L
 
 namespace {
 
@@ -107,6 +112,8 @@ static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2Primitiv
 
 static int width = 0;
 static int height = 0;
+static int trueWidth = 0;
+static int trueHeight = 0;
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
@@ -138,26 +145,74 @@ template <> __df__ double              maximum<double            >(double x, dou
 #undef __df__
 */
 
+// Generates a random float between A and B
+// From https://stackoverflow.com/a/24537113/3421536
+// See also: https://stackoverflow.com/a/25034092/3421536
+__device__
+int generateRandomInt(float A, float B, int idx) {
+	curandState state;
+	curand_init(RANDOM_SEED, idx, 0, &state);
+	float randu_f = curand_uniform(&state);
+	randu_f *= (B-A+0.999999); // You should not use (B-A+1)*
+	randu_f += A;
+	int randu_int = __float2int_rz(randu_f);
+	return randu_int;
+}
+
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
  */
 __global__ 
-void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
+void sendImageToPBO(uchar4 *pbo, int w, int h, int trueWidth, int trueHeight, glm::vec3 *image) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
-    if (x < w && y < h) {
-        glm::vec3 color;
-        color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-        color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-        color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
-        // Each thread writes one pixel location in the texture (textel)
-        pbo[index].w = 0;
-        pbo[index].x = color.x;
-        pbo[index].y = color.y;
-        pbo[index].z = color.z;
+    if (x >= trueWidth || y >= trueHeight) { return; }
+
+    glm::vec3 color(0, 0, 0);
+
+#if OPTION_ENABLE_SSAA
+    //Random SSAA
+    // Possible colors
+    int minX = x * OPTION_SSAA_GRID_SIZE;
+    int minY = (y * OPTION_SSAA_GRID_SIZE) * w;
+    int maxX = x * OPTION_SSAA_GRID_SIZE + OPTION_SSAA_GRID_SIZE - 1;
+    int maxY = (y * OPTION_SSAA_GRID_SIZE + OPTION_SSAA_GRID_SIZE - 1) * w;
+
+    glm::vec3 samples[OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE];
+    int i = 0;
+    //Fill array
+    for (int xIdx = minX; xIdx < maxX; xIdx++) {
+    	for (int yIdx = minY; yIdx < maxY; yIdx++) {
+    		int sampleIndex = xIdx + yIdx;
+    		samples[i] = image[sampleIndex];
+    		i++;
+    	}
     }
+
+    // Generate random samples and add randomly selected pixel
+    int randomIndex = 0;
+    for (i = 0; i < OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE; i++) {
+    	randomIndex = generateRandomInt(0, OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE, index);
+    	color += samples[randomIndex];
+    }
+    //Take the average
+    color /= (OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE);
+    color.x = glm::clamp(color.x, 0.0f, 1.0f) * 255.0;
+    color.y = glm::clamp(color.y, 0.0f, 1.0f) * 255.0;
+    color.z = glm::clamp(color.z, 0.0f, 1.0f) * 255.0;
+
+#else
+    color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
+    color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
+    color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+#endif
+    // Each thread writes one pixel location in the texture (textel)
+    pbo[index].w = 0;
+    pbo[index].x = color.x;
+    pbo[index].y = color.y;
+    pbo[index].z = color.z;
 }
 
 /** 
@@ -192,6 +247,14 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *frameBuffer) {
 void rasterizeInit(int w, int h) {
     width = w;
     height = h;
+    trueWidth = width;
+    trueHeight = height;
+
+#if OPTION_ENABLE_SSAA
+    width *= OPTION_SSAA_GRID_SIZE;
+    height *= OPTION_SSAA_GRID_SIZE;
+#endif
+
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -796,6 +859,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
 		(height - 1) / blockSize2d.y + 1);
+    dim3 trueBlockCount2d((trueWidth  - 1) / blockSize2d.x + 1,
+    		(trueHeight - 1) / blockSize2d.y + 1);
 
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
@@ -849,7 +914,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+    sendImageToPBO<<<trueBlockCount2d, blockSize2d>>>(pbo, width, height, trueWidth, trueHeight, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
 }
 
