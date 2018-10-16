@@ -13,7 +13,7 @@ CUDA Rasterizer
 </p>
 
 
-In this project, I implemented a Path Tracer using the CUDA parallel computing platform. Path Tracing is a computer graphics Monte Carlo method of rendering images of three-dimensional scenes such that the global illumination is faithful to reality. 
+In this project, I implemented a Rasterizer using the CUDA parallel computing platform.
 
 # Video Demo
 [<img src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/thumb.png">](https://youtu.be/lv1ACI_r01s)
