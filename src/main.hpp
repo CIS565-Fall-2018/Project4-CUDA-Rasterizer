@@ -51,7 +51,9 @@ int width = 800;
 int height = 800;
 
 bool useTiles = true;
-int tilePixelSize = 64;
+int tilePixelSize = 16;
+
+float avgFrameTime;
 
 //-------------------------------
 //-------------MAIN--------------

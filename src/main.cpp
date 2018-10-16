@@ -9,6 +9,7 @@
 
 
 #include "main.hpp"
+#include <chrono>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYGLTF_LOADER_IMPLEMENTATION
@@ -50,7 +51,7 @@ int main(int argc, char **argv) {
 	}
 
 
-    frame = 0;
+    frame = 1;
     seconds = time(NULL);
     fpstracker = 0;
 
@@ -98,7 +99,7 @@ void mainLoop() {
 //---------RUNTIME STUFF---------
 //-------------------------------
 float scale = 1.0f;
-float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
+float x_trans = 0.0f, y_trans = 0.0f, z_trans = -1.0f;
 float x_angle = 0.0f, y_angle = 0.0f;
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -121,7 +122,21 @@ void runCuda() {
 	glm::mat4 MVP = P * MV;
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
+
+	std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
+
 	rasterize(dptr, MVP, MV, MV_normal, useTiles);
+	
+	std::chrono::high_resolution_clock::time_point endTime = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::milli> duro = endTime - startTime;
+	float elapsedTime = static_cast<decltype(elapsedTime)>(duro.count());
+	
+	avgFrameTime += elapsedTime;
+	if (frame % 100 == 0) {
+		printf("100 frames took avg %f milliseconds\n", avgFrameTime / 100);
+		avgFrameTime = 0;
+	}	
+	
 	cudaGLUnmapBufferObject(pbo);
 
     frame++;

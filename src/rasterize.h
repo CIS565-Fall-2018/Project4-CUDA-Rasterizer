@@ -16,6 +16,8 @@ namespace tinygltf{
 	class Scene;
 }
 
+#define USE_Tiles = true;
+#define TILE_SIZE = 16;
 
 void rasterizeInit(int width, int height, int tilePixelSize);
 void rasterizeSetBuffers(const tinygltf::Scene & scene);
