@@ -662,7 +662,8 @@ void _vertexTransformAndAssembly(
 		// Finally transform x and y to viewport space
 		glm::vec4 vPosition = glm::vec4(primitive.dev_position[vid], 1.0f);
 		glm::vec3 vNormal = primitive.dev_normal[vid];
-		glm::vec4 clipPosition = vPosition * MVP;
+		// Order of multiplication is important here!
+		glm::vec4 clipPosition = MVP * vPosition;
 
 		clipPosition = clipPosition / clipPosition.w;
 
@@ -674,12 +675,9 @@ void _vertexTransformAndAssembly(
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-		
-		//Is this okay? Are values copied, or are we passing stack reference?
-		VertexOut& ans = primitive.dev_verticesOut[vid];
-		ans.eyePos = eyePos;
-		ans.eyeNor = eyeNor;
-		ans.pos = clipPosition;
+		primitive.dev_verticesOut[vid].eyePos = eyePos;
+		primitive.dev_verticesOut[vid].eyeNor = eyeNor;
+		primitive.dev_verticesOut[vid].pos = clipPosition;
 
 	}
 }
