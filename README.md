@@ -11,6 +11,8 @@ CUDA Rasterizer
 * Tested on: Windows 10, i7-6700HQ @ 2.60GHz 8GB, GTX 960M 4096MB (Personal Laptop)
   
   
+![Sample 1](renders/test2.gif)
+  
 ### (TODO: Your README)
 
 *DO NOT* leave the README to the last minute! It is a crucial part of the
