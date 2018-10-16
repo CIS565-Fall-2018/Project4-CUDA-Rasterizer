@@ -719,9 +719,9 @@ void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
     const int maxX = glm::min(glm::max((int)bBox.max.x, 0 ), width - 1);
     const int maxY = glm::min(glm::max((int)bBox.max.y, 0 ), height - 1);
 
-    for (int x = minX; x < maxX; x++)
+    for (int x = minX; x <= maxX; x++)
     {
-        for (int y = minY; y < maxY; y++) 
+        for (int y = minY; y <= maxY; y++) 
         {
             glm::vec3 barycentric = calculateBarycentricCoordinate(triangle, glm::vec2(x, y));
             if (isBarycentricCoordInBounds(barycentric))
@@ -739,6 +739,7 @@ void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
                             Fragment& fragment = dev_fragmentBuffer[fragmentId];
                             fragment.eyePos = v0.eyePos * barycentric.x + v1.eyePos * barycentric.y + v2.eyePos * barycentric.z;
                             fragment.eyeNor = v0.eyeNor * barycentric.x + v1.eyeNor * barycentric.y + v2.eyeNor * barycentric.z;
+                            fragment.color = fragment.eyeNor;
                         }
                     }
                     
