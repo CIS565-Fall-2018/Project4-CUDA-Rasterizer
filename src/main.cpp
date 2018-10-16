@@ -184,6 +184,8 @@ bool init(const tinygltf::Scene & scene) {
 
 	rasterizeSetBuffers(scene);
 
+	rasterizeSetTileBuffers();
+
     GLuint passthroughProgram;
     passthroughProgram = initShader();
 
@@ -215,7 +217,7 @@ void initCuda() {
     // Use device with highest Gflops/s
     cudaGLSetGLDevice(0);
 
-    rasterizeInit(width, height);
+    rasterizeInit(width, height, tilePixelSize);
 
     // Clean up on program exit
     atexit(cleanupCuda);

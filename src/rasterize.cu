@@ -106,10 +106,18 @@ static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2Primitiv
 static int width = 0;
 static int height = 0;
 
+static int tilePixelSize = 16;
+static int tileWidth = 0;
+static int tileHeight = 0;
+
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
+
+static int *dev_tilePrimitives = NULL;
+static unsigned int *dev_primitiveIdxPerTile = NULL;
+static unsigned int maxPrimitivesPerTile = 512;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
 
@@ -159,9 +167,12 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 /**
  * Called once at the beginning of the program to allocate memory.
  */
-void rasterizeInit(int w, int h) {
+void rasterizeInit(int w, int h, int tilePixels) {
     width = w;
     height = h;
+	tilePixelSize = tilePixels;
+	tileWidth = (int)ceil(w / tilePixels);
+	tileHeight = (int)ceil(h / tilePixels);
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -634,6 +645,16 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 }
 
 
+/**
+	Allocates space for tilePrimitiveBuffers
+*/
+void rasterizeSetTileBuffers(){
+	maxPrimitivesPerTile = totalNumPrimitives; // TODO: make this smaller
+	cudaMalloc(&dev_tilePrimitives, tileWidth * tileHeight * maxPrimitivesPerTile * sizeof(int));
+	cudaMalloc(&dev_primitiveIdxPerTile, tileWidth * tileHeight * sizeof(unsigned int));
+}
+
+
 
 __global__ 
 void _vertexTransformAndAssembly(
@@ -720,7 +741,7 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 		AABB box = getAABBForTriangle(vertices);
 
 		// loop over all pixels of p's screen-clamped AABB to see if it's in p
-		for (int j = fmaxf(0, (int)box.min.y); j < fminf(height, (int)box.max.y + 1); j++) {
+		for (int j = fmaxf(0, (int)box.min.y); j < fminf(height, (int)box.max.y + 1); j++) {  // TODO: use ceil and floor here
 			for (int i = fmaxf(0, (int)box.min.x); i < fminf(width, (int)box.max.x + 1); i++) {
 				int fidx = j * width + i;
 				glm::vec2 fragmentPos = glm::vec2(i + 0.5, j + 0.5f);
@@ -746,6 +767,37 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 		}
 
 		
+	}
+}
+
+
+__global__
+void dividePrimToTiles(Primitive* primitives, int* tilePrimitives, unsigned int* primitivesIdxPerTile, int numPrimitives,
+	unsigned int maxPrimitivesPerTile, int width, int height, int tileWidth, int tileHeight, int tilePixelSize) {
+	int pidx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+	if (pidx < numPrimitives) {
+		const Primitive& p = primitives[pidx];
+		glm::vec3 vertices[3];
+		vertices[0] = glm::vec3(p.v[0].pos);
+		vertices[1] = glm::vec3(p.v[1].pos);
+		vertices[2] = glm::vec3(p.v[2].pos);
+		AABB box = getAABBForTriangle(vertices);
+
+		// add the primitive to all tiles overlapped by the AABB
+		int tileMinX = fmaxf(0.0f, floorf(box.min.x / tilePixelSize));
+		int tileMaxX = fminf(tileHeight - 1, ceilf(box.max.x / tilePixelSize));
+		int tileMinY = fmaxf(0.0f, floorf(box.min.y / tilePixelSize));
+		int tileMaxY = fminf(tileWidth - 1, floorf(box.max.y / tilePixelSize));
+		for (int i = tileMinX; i <= tileMaxX; i++) {
+			for (int j = tileMinY; j <= tileMinY; j++) {
+				int tileIdx = width * i + j;
+				// get the next index to read in primitivesIdxPerTile using atomicInc
+				unsigned int nextWriteIdx = atomicInc(&primitivesIdxPerTile[tileIdx], maxPrimitivesPerTile);
+				// get write the pidx into tilePrimitives
+				tilePrimitives[tileIdx * maxPrimitivesPerTile + nextWriteIdx] = pidx;
+			}
+		}
 	}
 }
 
@@ -793,13 +845,22 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 		checkCUDAError("Vertex Processing and Primitive Assembly");
 	}
-	
+
+	dim3 numThreadsPerBlock(128);
+	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+
+	// reset the tilePrimitive buffer
+	cudaMemset(dev_tilePrimitives, -1, tileWidth * tileHeight * maxPrimitivesPerTile * sizeof(int));
+	cudaMemset(dev_primitiveIdxPerTile, 0, tileWidth * tileHeight * sizeof(unsigned int));
+	// divide primitives into tiles by their AABB
+	dividePrimToTiles <<<numBlocksForPrimitives, numThreadsPerBlock>>> (dev_primitives, dev_tilePrimitives, dev_primitiveIdxPerTile, totalNumPrimitives, maxPrimitivesPerTile, width, height, tileWidth, tileHeight, tilePixelSize);
+
+	// reset the depth buffer
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// Rasterize
-	dim3 numThreadsPerBlock(128);
-	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+	
 	rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, dev_depth, totalNumPrimitives, width, height);
 
 
