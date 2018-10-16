@@ -135,6 +135,94 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 	}
 }
 
+
+__device__
+glm::vec3 genTextureColor(Fragment f) {
+	float u = f.texcoord0.x * (f.texWidth - 1);
+	float v = f.texcoord0.y * (f.texHeight - 1);
+
+	int tex_x = u;
+	int tex_y = v;
+
+	float u_ratio = u - tex_x;
+	float v_ratio = v - tex_y;
+
+	glm::vec3 tex_col;
+	glm::vec3 temp;
+
+	int tex_idx = 3 * (tex_x + f.texWidth * tex_y);
+
+	// if out of bounds give error color RED
+	if (tex_y > (f.texHeight - 1) || tex_y < 0 || tex_x >(f.texWidth - 1) || tex_x < 0) {
+		tex_col = glm::vec3(255.0f, 0.0f, 0.0f);
+	}
+	else {
+		bool wrap_x = false; bool wrap_y = false;
+
+		if (tex_y + 1 == f.texHeight) wrap_y = true;
+		if (tex_x + 1 == f.texWidth) wrap_x = true;
+
+		// (x, y)
+		tex_col.x = f.dev_diffuseTex[tex_idx];
+		tex_col.y = f.dev_diffuseTex[tex_idx + 1];
+		tex_col.z = f.dev_diffuseTex[tex_idx + 2];
+
+		tex_col *= (1 - u_ratio) * (1 - v_ratio);
+
+		// (x + 1, y)
+		if (wrap_x) {
+			tex_idx = 3 * tex_y * f.texWidth;
+		}
+		else {
+			tex_idx = tex_idx + 3;
+		}
+		temp.x = f.dev_diffuseTex[tex_idx];
+		temp.y = f.dev_diffuseTex[tex_idx + 1];
+		temp.z = f.dev_diffuseTex[tex_idx + 2];
+
+		tex_col += (temp * u_ratio * (1 - v_ratio));
+
+		// (x, y + 1)
+		if (wrap_y) {
+			tex_idx = 3 * tex_x;
+		}
+		else {
+			tex_idx = 3 * (tex_x + f.texWidth * (tex_y + 1));
+		}
+
+		temp.x = f.dev_diffuseTex[tex_idx];
+		temp.y = f.dev_diffuseTex[tex_idx + 1];
+		temp.z = f.dev_diffuseTex[tex_idx + 2];
+
+		tex_col += (temp * v_ratio * (1 - u_ratio));
+
+		// (x + 1, y + 1)
+		if (wrap_x && wrap_y) {
+			tex_idx = 0;
+		}
+		else if (wrap_x) {
+			tex_idx = 3 * (f.texWidth * (tex_y + 1));
+		}
+		else if (wrap_y) {
+			tex_idx = tex_idx = 3 * (tex_x + 1);
+		}
+		else {
+			tex_idx = 3 * ((tex_x + 1) + f.texWidth * (tex_y + 1));
+		}
+
+		temp.x = f.dev_diffuseTex[tex_idx];
+		temp.y = f.dev_diffuseTex[tex_idx + 1];
+		temp.z = f.dev_diffuseTex[tex_idx + 2];
+
+		tex_col += (temp * v_ratio * u_ratio);
+
+	}
+
+	tex_col = tex_col / 255.0f;
+
+	return tex_col;
+}
+
 /**
 * Writes fragment colors to the framebuffer
 */
@@ -154,21 +242,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
 		// apply texture color
 		if (f.dev_diffuseTex != NULL) {
-			int tex_x = f.texcoord0.x * (f.texWidth - 1);
-			int tex_y = f.texcoord0.y * (f.texHeight - 1);
 			
-			glm::vec3 tex_col;
-
-			if (tex_y > (f.texHeight - 1) || tex_y < 0 || tex_x >(f.texWidth - 1) || tex_x < 0) tex_col = glm::vec3(256.0f, 0.0f, 0.0f);
-			else {
-				int tex_idx = 3 * (tex_x + f.texWidth * tex_y);
-				tex_col.x = f.dev_diffuseTex[tex_idx];
-				tex_col.y = f.dev_diffuseTex[tex_idx + 1];
-				tex_col.z = f.dev_diffuseTex[tex_idx + 2];
-
-			}
-			
-			framebuffer[index] = tex_col / 256.0f * diffuseLight;
+			framebuffer[index] = genTextureColor(f) * diffuseLight;
 		}
 		else {
 			framebuffer[index] = fragmentBuffer[index].color * diffuseLight;
@@ -789,6 +864,7 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 
 	int z;
 	float z_float;
+	float w;
 
 	bool isSet = false;
 
@@ -800,11 +876,12 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 			inside = isBarycentricCoordInBounds(bary);
 
 			// depth buffer
-			z_float = -getZAtCoordinate(bary, tri);
+			z_float = getZAtCoordinate(bary, tri);
 			if (z_float < 0 || z_float > 1) continue;
 
 			z = z_float * INT_MAX;
 
+			w = 1.0f / ((bary.x / tri[0].z) + (bary.y / tri[1].z) + (bary.z / tri[2].z));
 
 			if (inside) {
 				//if (fragBuf[f_idx].color != f_true.color) fragBuf[f_idx] = f_false; // for testing
@@ -825,10 +902,10 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 							// generate interpolated attributes
 							if (p.v[0].dev_diffuseTex != NULL) {
 								//glm::vec2 tri_uv[3] = { p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0 };
-								fragBuf[f_idx].texcoord0 = z_float * ((p.v[0].texcoord0 * bary.x / tri[0].z) + (p.v[1].texcoord0 * bary.y / tri[1].z) + (p.v[2].texcoord0 * bary.z / tri[2].z));
+								fragBuf[f_idx].texcoord0 = w * ((p.v[0].texcoord0 * bary.x / tri[0].z) + (p.v[1].texcoord0 * bary.y / tri[1].z) + (p.v[2].texcoord0 * bary.z / tri[2].z));
 							}
 							
-							fragBuf[f_idx].eyeNor = z_float * ((tri_norm[0] * bary.x / tri[0].z) + (tri_norm[1] * bary.y / tri[1].z) + (tri_norm[2] * bary.z / tri[2].z));
+							fragBuf[f_idx].eyeNor = w * ((tri_norm[0] * bary.x / tri[0].z) + (tri_norm[1] * bary.y / tri[1].z) + (tri_norm[2] * bary.z / tri[2].z));
 							//fragBuf[f_idx].eyePos = z_float * ((tri_eye[0] * bary.x / tri[0].z) + (tri_eye[1] * bary.y / tri[1].z) + (tri_eye[2] * bary.z / tri[2].z));
 						}
 
