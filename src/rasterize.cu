@@ -113,6 +113,9 @@ static glm::vec3 *dev_framebuffer = NULL;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
 
+//Additional globals
+static int * dev_mutex = NULL; //int []
+
 /*
 //From https://stackoverflow.com/a/1855465/3421536
 static int imin = std::numeric_limits<int>::min(); // minimum value
@@ -187,6 +190,14 @@ void rasterizeInit(int w, int h) {
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(int));
+
+	// Additional vars
+	// Why free before malloc?
+	cudaFree(dev_mutex);
+	const int devMutexSize = sizeof(int) * width * height;
+	cudaMalloc(&dev_mutex, devMutexSize);
+	// Initialize empty, since cuda does not have calloc
+	cudaMemset(dev_mutex, 0, devMutexSize);
 
 	checkCUDAError("rasterizeInit");
 }
@@ -709,8 +720,9 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 }
 
 __global__ void rasterizePrimitive (
+			int N,
 			Primitive * dev_primitives, Fragment * dev_fragmentBuffer,
-			int * dev_depth, int width, int height, int N) {
+			int * dev_depth, int * dev_mutex, int width, int height) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if (idx >= N) { return; }
@@ -736,21 +748,29 @@ __global__ void rasterizePrimitive (
 			glm::vec3 barycentricCoordinate =
 					calculateBarycentricCoordinate(points, glm::vec2(w, h));
 			if (isBarycentricCoordInBounds(barycentricCoordinate)) {
-				float depth = getZAtCoordinate(barycentricCoordinate, points) * INT_MAX * -1;
+				// Wait for mutex lock
+				int isSet;
+				do {
+					isSet = (atomicCAS(&dev_mutex[idx], 0, 1));
+					if(!isSet) { continue; }
 
-				if (depth < dev_depth[fragmentIdx]) {
-					//Update the fragment
-					dev_depth[fragmentIdx] = depth;
-					dev_fragmentBuffer[fragmentIdx].eyePos =
-							dev_primitives[idx].v[0].eyePos * barycentricCoordinate[0] +
-							dev_primitives[idx].v[1].eyePos * barycentricCoordinate[1] +
-							dev_primitives[idx].v[2].eyePos * barycentricCoordinate[2];
-					dev_fragmentBuffer[fragmentIdx].eyeNor =
-							dev_primitives[idx].v[0].eyeNor * barycentricCoordinate[0] +
-							dev_primitives[idx].v[1].eyeNor * barycentricCoordinate[1] +
-							dev_primitives[idx].v[2].eyeNor * barycentricCoordinate[2];
-					dev_fragmentBuffer[fragmentIdx].color = dev_fragmentBuffer[fragmentIdx].eyeNor;
-				}
+					float depth = getZAtCoordinate(barycentricCoordinate, points) * INT_MAX * -1;
+
+					if (depth < dev_depth[fragmentIdx]) {
+						//Update the fragment
+						dev_depth[fragmentIdx] = depth;
+						dev_fragmentBuffer[fragmentIdx].eyePos =
+								dev_primitives[idx].v[0].eyePos * barycentricCoordinate[0] +
+								dev_primitives[idx].v[1].eyePos * barycentricCoordinate[1] +
+								dev_primitives[idx].v[2].eyePos * barycentricCoordinate[2];
+						dev_fragmentBuffer[fragmentIdx].eyeNor =
+								dev_primitives[idx].v[0].eyeNor * barycentricCoordinate[0] +
+								dev_primitives[idx].v[1].eyeNor * barycentricCoordinate[1] +
+								dev_primitives[idx].v[2].eyeNor * barycentricCoordinate[2];
+						dev_fragmentBuffer[fragmentIdx].color = dev_fragmentBuffer[fragmentIdx].eyeNor;
+					}
+				} while(!isSet);
+				dev_mutex[idx] = 0;
 			}
 		}
 	}
@@ -810,7 +830,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	int primitiveBlockCount = (numThreadsPerBlock.x + totalNumPrimitives - 1) / numThreadsPerBlock.x;
 	//Launch primitive kernel
 	rasterizePrimitive <<< primitiveBlockCount, numThreadsPerBlock >>>(
-			dev_primitives, dev_fragmentBuffer, dev_depth, width, height, totalNumPrimitives);
+			totalNumPrimitives,
+			dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex,
+			width, height);
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
@@ -857,6 +879,9 @@ void rasterizeFree() {
 
 	cudaFree(dev_depth);
 	dev_depth = NULL;
+
+	cudaFree(dev_mutex);
+	dev_mutex = NULL;
 
     checkCUDAError("rasterize Free");
 }
