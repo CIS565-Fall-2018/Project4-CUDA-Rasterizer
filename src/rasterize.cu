@@ -18,6 +18,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <math.h>
+
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -62,8 +64,8 @@ namespace {
 		// The attributes listed below might be useful, 
 		// but always feel free to modify on your own
 
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;
 		// VertexAttributeTexcoord texcoord0;
 		// TextureData* dev_diffuseTex;
 		// ...
@@ -110,6 +112,26 @@ static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
+
+/*
+//From https://stackoverflow.com/a/1855465/3421536
+static int imin = std::numeric_limits<int>::min(); // minimum value
+static int imax = std::numeric_limits<int>::max();
+
+//Allow min/max from __device__ functions
+//From https://stackoverflow.com/a/45516170/3421536
+#define __df__ __device__ __forceinline__
+template <typename T> __df__ T maximum(T x, T y);
+template <> __df__ int                 maximum<int               >(int x, int y)                               { return max(x,y);    }
+template <> __df__ unsigned int        maximum<unsigned          >(unsigned int x, unsigned int y)             { return umax(x,y);   }
+template <> __df__ long                maximum<long              >(long x, long y)                             { return llmax(x,y);  }
+template <> __df__ unsigned long       maximum<unsigned long     >(unsigned long x, unsigned long y)           { return ullmax(x,y); }
+template <> __df__ long long           maximum<long long         >(long long x, long long y)                   { return llmax(x,y);  }
+template <> __df__ unsigned long long  maximum<unsigned long long>(unsigned long long x, unsigned long long y) { return ullmax(x,y); }
+template <> __df__ float               maximum<float             >(float x, float y)                           { return fmaxf(x,y);  }
+template <> __df__ double              maximum<double            >(double x, double y)                         { return fmax(x,y);   }
+#undef __df__
+*/
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -638,10 +660,27 @@ void _vertexTransformAndAssembly(
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
 		// Then divide the pos by its w element to transform into NDC space
 		// Finally transform x and y to viewport space
+		glm::vec4 vPosition = glm::vec4(primitive.dev_position[vid], 1.0f);
+		glm::vec3 vNormal = primitive.dev_normal[vid];
+		glm::vec4 clipPosition = vPosition * MVP;
+
+		clipPosition = clipPosition / clipPosition.w;
+
+		clipPosition.x = ( width * (clipPosition.x / clipPosition.w + 1.0f) / 2);
+		clipPosition.y = ( height * (1 - (clipPosition.y / clipPosition.w)) / 2);
+
+		glm::vec3 eyePos = glm::vec3(vPosition * MV);
+		glm::vec3 eyeNor = glm::normalize(vNormal * MV_normal);
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
 		
+		//Is this okay? Are values copied, or are we passing stack reference?
+		VertexOut& ans = primitive.dev_verticesOut[vid];
+		ans.eyePos = eyePos;
+		ans.eyeNor = eyeNor;
+		ans.pos = clipPosition;
+
 	}
 }
 
@@ -657,15 +696,13 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 	if (iid < numIndices) {
 
-		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
-
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
+		int pid;	// id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 
 		// TODO: other primitive types (point, line)
@@ -673,6 +710,53 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
+__global__ void rasterizePrimitive (
+			Primitive * dev_primitives, Fragment * dev_fragmentBuffer,
+			int * dev_depth, int width, int height, int N) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (idx >= N) { return; }
+
+	//Triangle, defined by three points, used to get AABB
+	glm::vec3 points[3];
+	points[0] = glm::vec3(dev_primitives[idx].v[0].pos);
+	points[1] = glm::vec3(dev_primitives[idx].v[1].pos);
+	points[2] = glm::vec3(dev_primitives[idx].v[2].pos);
+	AABB aabb = getAABBForTriangle(points);
+
+	//Get bounds, max of screen, img
+	// x = width; y = height;
+	int widthStart = max(0, (int) aabb.min.x);
+	int widthEnd = min(width, (int) aabb.max.x);
+	int heightStart = max(0, (int) aabb.min.y);
+	int heightEnd = min(height, (int) aabb.max.y);
+
+	// Process each visible pixel
+	for (int h = heightStart; h <= heightEnd; h++) {
+		for (int w = widthStart; w <= widthEnd; w++) {
+			int fragmentIdx = width * h + w;
+			glm::vec3 barycentricCoordinate =
+					calculateBarycentricCoordinate(points, glm::vec2(w, h));
+			if (isBarycentricCoordInBounds(barycentricCoordinate)) {
+				float depth = getZAtCoordinate(barycentricCoordinate, points) * INT_MAX * -1;
+
+				if (depth < dev_depth[fragmentIdx]) {
+					//Update the fragment
+					dev_depth[fragmentIdx] = depth;
+					dev_fragmentBuffer[fragmentIdx].eyePos =
+							dev_primitives[idx].v[0].eyePos * barycentricCoordinate[0] +
+							dev_primitives[idx].v[1].eyePos * barycentricCoordinate[1] +
+							dev_primitives[idx].v[2].eyePos * barycentricCoordinate[2];
+					dev_fragmentBuffer[fragmentIdx].eyeNor =
+							dev_primitives[idx].v[0].eyeNor * barycentricCoordinate[0] +
+							dev_primitives[idx].v[1].eyeNor * barycentricCoordinate[1] +
+							dev_primitives[idx].v[2].eyeNor * barycentricCoordinate[2];
+					dev_fragmentBuffer[fragmentIdx].color = dev_fragmentBuffer[fragmentIdx].eyeNor;
+				}
+			}
+		}
+	}
+}
 
 
 /**
@@ -723,8 +807,12 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// TODO: rasterize
-
-
+	//Copied from code above, why 128?
+	dim3 numThreadsPerBlock(128, 1, 1);
+	int primitiveBlockCount = (numThreadsPerBlock.x + totalNumPrimitives - 1) / numThreadsPerBlock.x;
+	//Launch primitive kernel
+	rasterizePrimitive <<< primitiveBlockCount, numThreadsPerBlock >>>(
+			dev_primitives, dev_fragmentBuffer, dev_depth, width, height, totalNumPrimitives);
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
