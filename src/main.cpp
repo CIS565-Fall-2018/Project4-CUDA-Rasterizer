@@ -106,7 +106,7 @@ void runCuda() {
     dptr = NULL;
 	int timert = GetTickCount() - starttime;
 
-	y_angle = 0.001*timert;
+	//y_angle = 0.001*timert;
 	glm::mat4 P = glm::frustum<float>(-scale * ((float)width) / ((float)height),
 		scale * ((float)width / (float)height),
 		-scale, scale, 3, 1000.0);
@@ -141,8 +141,8 @@ bool init(const tinygltf::Scene & scene) {
         return false;
     }
 
-    width = 1000;
-    height = 1000;
+    width = 800;
+    height = 800;
     window = glfwCreateWindow(width, height, "CIS 565 Pathtracer", NULL, NULL);
     if (!window) {
         glfwTerminate();
