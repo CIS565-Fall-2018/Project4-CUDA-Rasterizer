@@ -26,6 +26,11 @@ CUDA Rasterizer
 | ------------- |:-------------:|
 | ![](images/nobilinear.png)      | ![](images/bilinear.png)   |
 
+### Color Interpolation
+| Triangle       | Box            |
+| ------------- |:-------------:|
+| ![](images/triangle_color.png)      | ![](images/box_color.png)   |
+
 ### Rasterize point and line
 | Point cloud       | Wireframe            |
 | ------------- |:-------------:|

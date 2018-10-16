@@ -17,6 +17,7 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <chrono> 
 
 namespace {
 
@@ -98,12 +99,15 @@ namespace {
 
 }
 
-#define BLINN 1
-#define LAMBERT 0
+
+#define BLINN 0
+#define LAMBERT 1
 #define BILINEAR_FILTERING 0
 #define PERSPECTIVE_CORRECT 0
-#define RASTERIZE_POINT 1
+#define RASTERIZE_POINT 0
 #define RASTERIZE_LINE 0
+#define COLOR_INTERPOLATION 1
+#define TIMER 0
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -117,6 +121,13 @@ static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
+#if TIMER
+static double time_assembly = 0.0;
+static double time_rasterize = 0.0;
+static double time_render = 0.0;
+static double time_sendToPBO = 0.0;
+static int iter = 0;
+#endif
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -157,29 +168,34 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 		framebuffer[index] = fragmentBuffer[index].color;
 #else
 
-		// TODO: add your fragment shader code here
-		Fragment frag = fragmentBuffer[index];
-		glm::vec3 lightPos(5.f, 5.f, 5.f);
-		glm::vec3 lightVec = glm::normalize((lightPos - frag.eyePos));
-		glm::vec3 specColor(0.f, 0.f, 0.f);
-		float lambertian = glm::max(glm::dot(lightVec, frag.eyeNor), 0.0f);
-		glm::vec3 V = glm::normalize(frag.eyePos);
-		glm::vec3 L = lightVec;
-		glm::vec3 H = (V + L) / 2.f;
-		float exp = 20.f;
-		float specularTerm = glm::max(pow(glm::dot(glm::normalize(H), glm::normalize(frag.eyeNor)), exp), 0.f);;
-		float ambientTerm = 0.2;
-		float diffuseTerm = glm::dot(glm::normalize(frag.eyeNor), glm::normalize(lightVec));
-		diffuseTerm = glm::clamp(diffuseTerm, 0.f, 1.f);
-		glm::vec3 res = glm::vec3();
+		if (fragmentBuffer[index].dev_diffuseTex == NULL) {
+			framebuffer[index] = fragmentBuffer[index].color;
+		}
+		else {
+			// TODO: add your fragment shader code here
+			Fragment frag = fragmentBuffer[index];
+			glm::vec3 lightPos(5.f, 5.f, 5.f);
+			glm::vec3 lightVec = glm::normalize((lightPos - frag.eyePos));
+			glm::vec3 specColor(0.f, 0.f, 0.f);
+			float lambertian = glm::max(glm::dot(lightVec, frag.eyeNor), 0.0f);
+			glm::vec3 V = glm::normalize(frag.eyePos);
+			glm::vec3 L = lightVec;
+			glm::vec3 H = (V + L) / 2.f;
+			float exp = 20.f;
+			float specularTerm = glm::max(pow(glm::dot(glm::normalize(H), glm::normalize(frag.eyeNor)), exp), 0.f);;
+			float ambientTerm = 0.2;
+			float diffuseTerm = glm::dot(glm::normalize(frag.eyeNor), glm::normalize(lightVec));
+			diffuseTerm = glm::clamp(diffuseTerm, 0.f, 1.f);
+			glm::vec3 res = glm::vec3();
 #if BLINN
-		res = ambientTerm * glm::vec3(0.1, 0.1, 0.1) + diffuseTerm * frag.color + specularTerm * glm::vec3(1.f, 1.f, 1.f);
+			res = ambientTerm * glm::vec3(0.1, 0.1, 0.1) + diffuseTerm * frag.color + specularTerm * glm::vec3(1.f, 1.f, 1.f);
 #elif LAMBERT
-		res = ambientTerm * glm::vec3(0.1, 0.1, 0.1) + diffuseTerm * frag.color;
+			res = ambientTerm * glm::vec3(0.1, 0.1, 0.1) + diffuseTerm * frag.color;
 #else 
-		res = frag.color;
+			res = frag.color;
 #endif
-		framebuffer[index] = res;
+			framebuffer[index] = res;
+		}
 #endif
     }
 }
@@ -695,9 +711,10 @@ void _vertexTransformAndAssembly(
 		}
 		if (primitive.dev_diffuseTex != NULL) {
 			primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
-			primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
-			primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
+
 		}
+		primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
+		primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
 
 	}
 }
@@ -771,6 +788,17 @@ __global__ void rasterize_triangle(const int width, const int height, int* depth
 	tri[0] = glm::vec3(frag.v[0].pos);
 	tri[1] = glm::vec3(frag.v[1].pos);
 	tri[2] = glm::vec3(frag.v[2].pos);
+#if COLOR_INTERPOLATION
+		frag.v[0].col = glm::vec3(1.f, 0.f, 0.f);
+		if (index % 2 == 0) {
+			frag.v[1].col = glm::vec3(0.f, 1.f, 0.f);
+			frag.v[2].col = glm::vec3(0.f, 0.f, 1.f);
+		}
+		else {
+			frag.v[2].col = glm::vec3(0.f, 1.f, 0.f);
+			frag.v[1].col = glm::vec3(0.f, 0.f, 1.f);
+		}
+#endif
 #if RASTERIZE_POINT
 	glm::vec3 pointCol = glm::vec3(1.f, 0.f, 0.f);
 	for (int i = 0; i < 3; i++) {
@@ -880,7 +908,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
-
+#if TIMER
+	auto start = std::chrono::high_resolution_clock::now();
+#endif
 	// Vertex Process & primitive assembly
 	{
 		curPrimitiveBeginId = 0;
@@ -888,7 +918,6 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
-
 		for (; it != itEnd; ++it) {
 			auto p = (it->second).begin();	// each primitive
 			auto pEnd = (it->second).end();
@@ -912,7 +941,14 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 		checkCUDAError("Vertex Processing and Primitive Assembly");
 	}
-	
+#if TIMER
+	cudaDeviceSynchronize();
+	auto end = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+	time_assembly += double(duration.count());
+	std::cout << ++iter << " iteration" << std::endl;
+	std::cout << "Vertex transform and assembly cost " << time_assembly << " microsecond" << std::endl;
+#endif	
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
@@ -920,17 +956,39 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 	dim3 numThreadsPerBlock(128);
 	dim3 numBlocksPerGrid((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+#if TIMER
+	start = std::chrono::high_resolution_clock::now();
+#endif
 	rasterize_triangle << <numBlocksPerGrid, numThreadsPerBlock >> > (width, height, dev_depth, totalNumPrimitives, dev_primitives, dev_fragmentBuffer);
-	//_rasterization << <numBlocksPerGrid, numThreadsPerBlock >> >(totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, width, height);
-
-
-
+#if TIMER
+	cudaDeviceSynchronize();
+	end = std::chrono::high_resolution_clock::now();
+	duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+	time_rasterize += double(duration.count());
+	std::cout << "Rasterization cost " << time_rasterize << " microsecond" << std::endl;
+	start = std::chrono::high_resolution_clock::now();
+#endif
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
+#if TIMER
+	cudaDeviceSynchronize();
+	end = std::chrono::high_resolution_clock::now();
+	duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+	time_render += double(duration.count());
+	std::cout << "rendering cost " << time_render << " microsecond" << std::endl;
+	start = std::chrono::high_resolution_clock::now();
+#endif
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
     sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
+#if TIMER
+	cudaDeviceSynchronize();
+	end = std::chrono::high_resolution_clock::now();
+	duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+	time_sendToPBO += double(duration.count());
+	std::cout << "sendImageToPBO cost " << time_sendToPBO << " microsecond" << std::endl;
+#endif
 }
 
 /**
