@@ -18,6 +18,11 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+ // #define USE_LINE_SEGMENT_CHECK
+#define USE_BARY_CHECK
+
+#define DO_COLOR_LERP
+
 namespace
 {
   typedef unsigned short VertexIndex;
@@ -963,15 +968,20 @@ __device__ void TryStoreFragment(const Primitive& target, float xCoord, int yCoo
     v3.pos[2])));
   const int fragmentIntegerDepth = fragmentDepth * INT_MAX;
 
+#ifdef DO_COLOR_LERP
+  const glm::vec3 interpolatedColor = fragmentDepth * ((ratio1 * (glm::vec3(1,0,0) / v1.pos[2])) + (ratio2 * (glm::vec3(0,1,0) / v2.
+    pos[2])) + (ratio3 * (glm::vec3(0,0,1) / v3.pos[2])));
+#else
+  const glm::vec3 interpolatedColor = fragmentDepth * ((ratio1 * (v1.col / v1.pos[2])) + (ratio2 * (v2.col / v2.
+    pos[2])) + (ratio3 * (v3.col / v3.pos[2])));
+#endif
+
   const glm::vec2 interpolatedUV = fragmentDepth * ((ratio1 * (v1.texcoord0 / v1.pos[2])) + (ratio2 * (v2.texcoord0 / v2
     .pos[2])) + (ratio3 * (v3.texcoord0 / v3.pos[2])));
   const glm::vec3 interpolatedEyeNormal = fragmentDepth * ((ratio1 * (v1.eyeNor / v1.pos[2])) + (ratio2 * (v2.eyeNor /
     v2.pos[2])) + (ratio3 * (v3.eyeNor / v3.pos[2])));
   const glm::vec3 interpolatedEyePos = fragmentDepth * ((ratio1 * (v1.eyePos / v1.pos[2])) + (ratio2 * (v2.eyePos / v2.
     pos[2])) + (ratio3 * (v3.eyePos / v3.pos[2])));
-
-  const glm::vec3 interpolatedColor = fragmentDepth * ((ratio1 * (v1.col / v1.pos[2])) + (ratio2 * (v2.col / v2.
-    pos[2])) + (ratio3 * (v3.col / v3.pos[2])));
 
   Fragment targetFragment;
   targetFragment.color = interpolatedColor;
@@ -1054,9 +1064,6 @@ __device__ void TryStoreFragmentPoint(const Primitive& target, float xCoord, int
   }
 }
 
-// #define USE_LINE_SEGMENT_CHECK
-#define USE_BARY_CHECK
-
 __global__ void _rasterizeTriangles(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth,
                             Fragment* fragmentBuffer)
 {
@@ -1070,133 +1077,70 @@ __global__ void _rasterizeTriangles(int numPrimitives, Primitive* dev_primitives
 
   const Primitive& target = dev_primitives[primtiveId];
 
-  if (target.primitiveType == Triangle)
-  {
-    const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
-    const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
-    const glm::vec2 p2 = glm::vec2(target.v[2].pos[0], target.v[2].pos[1]);
+  const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+  const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
+  const glm::vec2 p2 = glm::vec2(target.v[2].pos[0], target.v[2].pos[1]);
 
-    const BoundingBox boundingBox = getBoundingBoxForTriangle(p0, p1, p2);
+  const BoundingBox boundingBox = getBoundingBoxForTriangle(p0, p1, p2);
 
 #ifdef USE_LINE_SEGMENT_CHECK
-  int rasterStartY = floor(boundingBox.min.y);
-  int rasterEndY = ceil(boundingBox.max.y);
-  ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+int rasterStartY = floor(boundingBox.min.y);
+int rasterEndY = ceil(boundingBox.max.y);
+ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
 
-  const float slope0 = GetLineSegmentSlope(p0, p1);
-  const float slope1 = GetLineSegmentSlope(p1, p2);
-  const float slope2 = GetLineSegmentSlope(p2, p0);
+const float slope0 = GetLineSegmentSlope(p0, p1);
+const float slope1 = GetLineSegmentSlope(p1, p2);
+const float slope2 = GetLineSegmentSlope(p2, p0);
 
-  for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
+for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
 
 
-    float rasterStartX = 0;
-    float rasterEndX = 0;
+  float rasterStartX = 0;
+  float rasterEndX = 0;
 
-    const bool result = CalculateIntersection(p0, p1, p2, slope0, slope1, slope2, boundingBox, rasterStartX, rasterEndX, yValue);
+  const bool result = CalculateIntersection(p0, p1, p2, slope0, slope1, slope2, boundingBox, rasterStartX, rasterEndX, yValue);
 
-    if (!result) {
-      continue;
-    }
-
-    ClampRange(rasterStartX, rasterEndX, 0, screenWidth - 1);
-
-    for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue) {
-      const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
-      const int pixelIndex = xValue + (yValue * screenWidth);
-      TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
-    }
+  if (!result) {
+    continue;
   }
+
+  ClampRange(rasterStartX, rasterEndX, 0, screenWidth - 1);
+
+  for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue) {
+    const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
+    const int pixelIndex = xValue + (yValue * screenWidth);
+    TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
+  }
+}
 #endif
 
 #ifdef USE_BARY_CHECK
-    int rasterStartX = floor(boundingBox.min.x);
-    int rasterEndX = ceil(boundingBox.max.x);
+  int rasterStartX = floor(boundingBox.min.x);
+  int rasterEndX = ceil(boundingBox.max.x);
 
-    ClampRangeInt(rasterStartX, rasterEndX, 0, screenWidth - 1);
+  ClampRangeInt(rasterStartX, rasterEndX, 0, screenWidth - 1);
 
-    for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue)
+  for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue)
+  {
+    int rasterStartY = floor(boundingBox.min.y);
+    int rasterEndY = ceil(boundingBox.max.y);
+    ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+
+    for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1)
     {
-      int rasterStartY = floor(boundingBox.min.y);
-      int rasterEndY = ceil(boundingBox.max.y);
-      ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+      const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
 
-      for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1)
+      if (!isBarycentricCoordInBounds(baryCoordinates))
       {
-        const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
-
-        if (!isBarycentricCoordInBounds(baryCoordinates))
-        {
-          continue;
-        }
-
-        const int pixelIndex = xValue + (yValue * screenWidth);
-        TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2],
-                         baryCoordinates, pixelIndex, depth, fragmentBuffer);
+        continue;
       }
+
+      const int pixelIndex = xValue + (yValue * screenWidth);
+      TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2],
+                       baryCoordinates, pixelIndex, depth, fragmentBuffer);
     }
+  }
 #endif
-  }
-
-  else if (target.primitiveType == Line)
-  {
-    const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
-    const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
-
-    const BoundingBox boundingBox = getBoundingBoxForLine(p0, p1);
-
-    int rasterStartY = floor(boundingBox.min.y);
-    int rasterEndY = ceil(boundingBox.max.y);
-    ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
-
-    const float slope0 = GetLineSegmentSlope(p0, p1);
-
-    for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
-      float xIntercept;
-
-      const bool doesIntersect = CheckLineSegmentIntersect(p0, p1, yValue, slope0, &xIntercept);
-
-      if (!doesIntersect)
-      {
-        continue;
-      }
-
-      int xValue = (int)glm::clamp(xIntercept, 0.0f, float(screenWidth - 1));
-
-      const int pixelIndex = xValue + (yValue * screenWidth);
-      TryStoreFragmentLine(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], pixelIndex, depth, fragmentBuffer);
-    }
-  }
-
-  else if (target.primitiveType == Point)
-  {
-    const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
-    const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
-
-    const BoundingBox boundingBox = getBoundingBoxForLine(p0, p1);
-
-    int rasterStartY = floor(boundingBox.min.y);
-    int rasterEndY = ceil(boundingBox.max.y);
-    ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
-
-    const float slope0 = GetLineSegmentSlope(p0, p1);
-
-    for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
-      float xIntercept;
-
-      const bool doesIntersect = CheckLineSegmentIntersect(p0, p1, yValue, slope0, &xIntercept);
-
-      if (!doesIntersect)
-      {
-        continue;
-      }
-
-      int xValue = (int)glm::clamp(xIntercept, 0.0f, float(screenWidth - 1));
-
-      const int pixelIndex = xValue + (yValue * screenWidth);
-      TryStoreFragmentLine(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], pixelIndex, depth, fragmentBuffer);
-    }
-  }
 }
 
 __global__ void _rasterizeLines(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth,

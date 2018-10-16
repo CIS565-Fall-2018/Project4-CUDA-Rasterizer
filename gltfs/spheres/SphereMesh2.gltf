@@ -1,0 +1,172 @@
+{
+    "asset": {
+        "copyright": "(C)2018 vasum",
+        "generator": "Maya2glTF V0.9.10 b7c0eed",
+        "version": "2.0"
+    },
+    "scenes": [
+        {
+            "nodes": [
+                0
+            ]
+        }
+    ],
+    "scene": 0,
+    "nodes": [
+        {
+            "mesh": 0,
+            "name": "SphereMesh"
+        }
+    ],
+    "meshes": [
+        {
+            "primitives": [
+                {
+                    "attributes": {
+                        "NORMAL": 1,
+                        "POSITION": 2,
+                        "TANGENT": 3,
+                        "TEXCOORD_0": 4
+                    },
+                    "indices": 0,
+                    "mode": 4,
+                    "material": 0
+                }
+            ],
+            "name": "SphereMeshShape"
+        }
+    ],
+    "accessors": [
+        {
+            "bufferView": 0,
+            "byteOffset": 0,
+            "componentType": 5123,
+            "count": 540,
+            "max": [
+                379
+            ],
+            "min": [
+                0
+            ],
+            "type": "SCALAR"
+        },
+        {
+            "bufferView": 1,
+            "byteOffset": 0,
+            "componentType": 5126,
+            "count": 380,
+            "max": [
+                0.9404471516609192,
+                0.9864150881767272,
+                0.9888444542884828
+            ],
+            "min": [
+                -0.9404470324516296,
+                -0.9864150881767272,
+                -0.9888444542884828
+            ],
+            "type": "VEC3"
+        },
+        {
+            "bufferView": 1,
+            "byteOffset": 4560,
+            "componentType": 5126,
+            "count": 380,
+            "max": [
+                1.0,
+                1.0,
+                0.9510565996170044
+            ],
+            "min": [
+                -1.0000001192092896,
+                -1.0,
+                -0.951056718826294
+            ],
+            "type": "VEC3"
+        },
+        {
+            "bufferView": 2,
+            "byteOffset": 0,
+            "componentType": 5126,
+            "count": 380,
+            "max": [
+                1.0,
+                2.396797924575367e-7,
+                0.9510565400123596,
+                1.0
+            ],
+            "min": [
+                -1.0,
+                -2.283461526531028e-7,
+                -0.9510565996170044,
+                1.0
+            ],
+            "type": "VEC4"
+        },
+        {
+            "bufferView": 3,
+            "byteOffset": 0,
+            "componentType": 5126,
+            "count": 380,
+            "max": [
+                1.0000001192092896,
+                1.0
+            ],
+            "min": [
+                0.0,
+                0.0
+            ],
+            "type": "VEC2"
+        }
+    ],
+    "materials": [
+        {
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [
+                    0.4000000059604645,
+                    0.4000000059604645,
+                    0.4000000059604645,
+                    1.0
+                ],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 1.0
+            },
+            "name": "lambert1"
+        }
+    ],
+    "bufferViews": [
+        {
+            "buffer": 0,
+            "byteOffset": 18240,
+            "byteLength": 1080,
+            "target": 34963
+        },
+        {
+            "buffer": 0,
+            "byteOffset": 6080,
+            "byteLength": 9120,
+            "byteStride": 12,
+            "target": 34962
+        },
+        {
+            "buffer": 0,
+            "byteOffset": 0,
+            "byteLength": 6080,
+            "byteStride": 16,
+            "target": 34962
+        },
+        {
+            "buffer": 0,
+            "byteOffset": 15200,
+            "byteLength": 3040,
+            "byteStride": 8,
+            "target": 34962
+        }
+    ],
+    "buffers": [
+        {
+            "byteLength": 19320,
+            "uri": "SphereMesh2.bin"
+        }
+    ]
+}
