@@ -18,6 +18,11 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define DISPLAY_TRIANGLE true
+#define DISPLAY_NORMAL true
+#define DISPLAY_LINE true
+#define DISPLAY_POINT true
+
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -46,8 +51,9 @@ namespace {
 		// glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
-		// ...
+
+		 int texWidth;
+		 int texHeight;
 	};
 
 	struct Primitive {
@@ -62,10 +68,13 @@ namespace {
 		// The attributes listed below might be useful, 
 		// but always feel free to modify on your own
 
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
-		// VertexAttributeTexcoord texcoord0;
-		// TextureData* dev_diffuseTex;
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;
+		VertexAttributeTexcoord texcoord0;
+		TextureData* dev_diffuseTex;
+
+		int texWidth;
+		int texHeight;
 		// ...
 	};
 
@@ -133,9 +142,17 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
     }
 }
 
+const glm::vec3 lightPosition(50.0f, 50.0f, 100.0f);
+
 /** 
 * Writes fragment colors to the framebuffer
 */
+
+glm::vec3 lerp(const glm::vec3 &x, const glm::vec3 &y, const float &alpha)
+{
+	return (1.0f - alpha) * x + alpha * y;
+}
+
 __global__
 void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -146,8 +163,70 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
         framebuffer[index] = fragmentBuffer[index].color;
 
 		// TODO: add your fragment shader code here
+		glm::vec3 &pixel = framebuffer[index];
+		pixel = glm::vec3(0.0f);
+		const Fragment &frag = fragmentBuffer[index];
 
-    }
+		glm::vec3 L = lightPosition - frag.eyePos;
+		L = glm::normalize(L);
+
+		const glm::vec3 &N = frag.eyeNor;
+		glm::vec3 V = glm::normalize(-N);
+		glm::vec3 H = glm::normalize(V + L);
+
+		glm::vec3 finalOutput(1.0f, 1.0f, 1.0f);
+		glm::vec3 texelFetched = glm::vec3(0.0f, 0.0f, 0.0f);
+		
+		if (frag.dev_diffuseTex != NULL) 
+		{
+			int texWidth = frag.texWidth;
+			int texHeight = frag.texHeight;
+
+			for (int i = 0; i < 4; ++i) 
+			{
+				float x = (texWidth - 1.0f) * fragmentBuffer[index].texcoord0[0];
+				float y = (texHeight - 1.0f) * fragmentBuffer[index].texcoord0[1];
+
+				int xLower = std::floor(x);
+				int yLower = std::floor(y);
+				int xUpper = (xLower + 1) % texWidth;
+				int yUpper = (yLower + 1) % texHeight;
+				int idxLowerLeft = xLower + yLower * texWidth;
+				int idxLowerRight = xUpper + yLower * texWidth;
+				int idxUpperLeft = xLower + yUpper * texWidth;
+				int idxUpperRight = xUpper + yUpper * texWidth;
+
+				glm::vec3 lowerLeftTexel = glm::vec3(frag.dev_diffuseTex[idxLowerLeft * 3],
+					frag.dev_diffuseTex[idxLowerLeft * 3 + 1], frag.dev_diffuseTex[idxLowerLeft * 3 + 2]);
+				glm::vec3 lowerRightTexel = glm::vec3(frag.dev_diffuseTex[idxLowerRight * 3],
+					frag.dev_diffuseTex[idxLowerRight * 3 + 1], frag.dev_diffuseTex[idxLowerRight * 3 + 2]);
+				glm::vec3 upperLeftTexel = glm::vec3(frag.dev_diffuseTex[idxUpperLeft * 3],
+					frag.dev_diffuseTex[idxUpperLeft * 3 + 1], frag.dev_diffuseTex[idxUpperLeft * 3 + 2]);
+				glm::vec3 upperRightTexel = glm::vec3(frag.dev_diffuseTex[idxUpperRight * 3],
+					frag.dev_diffuseTex[idxUpperRight * 3 + 1], frag.dev_diffuseTex[idxUpperRight * 3 + 2]);
+				//Coefs for bilinear filtering
+				float alphaX = x - static_cast<float>(xLower);
+				float alphaY = y - static_cast<float>(yLower);
+				
+				glm::vec3 lowerBelt = lerp(lowerLeftTexel, lowerRightTexel, alphaX);
+				glm::vec3 upperBelt = lerp(upperLeftTexel, upperRightTexel, alphaX);
+				texelFetched = lerp(lowerBelt, upperBelt, alphaY);
+			}
+		}
+
+		if (DISPLAY_TRIANGLE)
+		{
+			pixel = glm::max(0.f, glm::dot(L, N)) * texelFetched;
+		}
+		else if (DISPLAY_NORMAL)
+		{
+			pixel = glm::normalize(frag.eyeNor);
+		}
+		else if (DISPLAY_LINE || DISPLAY_POINT)
+		{
+			pixel = glm::normalize(frag.color);
+		}
+	}
 }
 
 /**
@@ -638,10 +717,26 @@ void _vertexTransformAndAssembly(
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
 		// Then divide the pos by its w element to transform into NDC space
 		// Finally transform x and y to viewport space
+		VertexOut &vertexV = primitive.dev_verticesOut[vid];
+		const glm::vec3 &pos = primitive.dev_position[vid];
+		const glm::vec3 &nor = primitive.dev_normal[vid];
 
+		glm::vec4 extendedPos = glm::vec4(pos, 1.0f);
+		vertexV.pos = MVP * extendedPos;
+		vertexV.pos.x = (1.0f - vertexV.pos.x) * 0.5f * width;
+		vertexV.pos.y = (1.0f - vertexV.pos.y) * 0.5f * height;
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
-		
+		vertexV.eyePos = multiplyMV(MV, extendedPos);
+		vertexV.eyeNor = MV_normal * nor;
+
+		if (primitive.dev_texcoord0 != NULL)
+		{
+			vertexV.texcoord0 = primitive.dev_texcoord0[vid];
+		}
+		vertexV.dev_diffuseTex = primitive.dev_diffuseTex;
+		vertexV.texWidth = primitive.diffuseTexWidth;
+		vertexV.texHeight = primitive.diffuseTexHeight;
 	}
 }
 
