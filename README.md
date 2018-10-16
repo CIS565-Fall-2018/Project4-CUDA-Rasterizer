@@ -16,6 +16,8 @@ A rasterizer takes 3D objects (defined using vector graphics) and converts it in
 
 ![](img/box-demo.gif)
 
+_Note:_ The screen door affect oberserved is due to the conversion from `mp4` to `gif` and **not** an affect of the rasterizer.
+
 This project implements a a rasterizer with the following features:
  - Vertex shading
  - Primitive assembly support
