@@ -21,13 +21,21 @@
 #define depthtest 0
 #define normaltest 0
 #define textureenabled 1
+
 #define lambert 0
 #define blinnphong 0
-#define perspectivecorrection 0
-#define bilinearfiltering 0
+#define perspectivecorrection 1
+#define bilinearfiltering 1
 #define primitiveline 0
 #define primitivepoints 0
 #define backfaceculling 0
+#define timeanalysis 0
+
+PerformanceTimer& timer()
+{
+	static PerformanceTimer timer;
+	return timer;
+}
 
 namespace {
 
@@ -121,7 +129,7 @@ static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2Primitiv
 static int width = 0;
 static int height = 0;
 __device__
-static int depthscale = 10000;
+static int depthscale = 100;
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
@@ -397,7 +405,7 @@ void _rasterize(int numPrimitives, int w, int h, Primitive* primitives, Fragment
 		for (int y = aabb.min.y; y <= aabb.max.y; y++) {
 			if (x >= w || x < 0 || y >= h || y < 0) continue;
 			glm::vec3 baryCoord = calculateBarycentricCoordinate(tri, glm::vec2(x, y));
-			if (isBarycentricCoordInBounds(baryCoord, 3, 0.1f))
+			if (isBarycentricCoordInBounds(baryCoord, 3, 0.05f))
 			{
 				int index = x + y * w;
 #if perspectivecorrection
@@ -405,7 +413,7 @@ void _rasterize(int numPrimitives, int w, int h, Primitive* primitives, Fragment
 #else
 				float z = getZAtCoordinate(baryCoord, tri);
 #endif
-				int depth = -depthscale * z;
+				int depth = depthscale * (-z);
 				atomicMin(&depths[index], depth);
 				if (depth == depths[index]) {
 					fragments[index].eyePos = barycentricInterpolation(baryCoord, p.v[0].eyePos, p.v[1].eyePos, p.v[2].eyePos);
@@ -421,7 +429,7 @@ void _rasterize(int numPrimitives, int w, int h, Primitive* primitives, Fragment
 #else
 					fragments[index].pos = barycentricInterpolation(baryCoord, tri);
 					fragments[index].pos.z = 1.0f - fragments[index].pos.z;
-					fragments[index].color = barycentricInterpolation(baryCoord, col);
+					fragments[index].color = glm::vec3(1.0f); //barycentricInterpolation(baryCoord, col);
 					fragments[index].texcoord0 = barycentricInterpolation(baryCoord, p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0);
 #endif
 				}
@@ -443,18 +451,17 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 	int index = x + (y * w);
 
 	if (x < w && y < h) {
-
+		framebuffer[index] = glm::vec3(0, 0, 0);
 		Fragment fragment = fragmentBuffer[index];
+
+		TextureData* diffuse = fragment.dev_diffuseTex;
 
 #if textureenabled
 
-		framebuffer[index] = glm::vec3(0, 0, 0);
-
-		glm::vec3 lightPos(5.0f, 5.0f, 5.0f);
+		glm::vec3 lightPos(0.0f, 10.0f, 10.0f);
 		glm::vec3 lightDir(glm::normalize(lightPos - fragment.eyePos));
 
 		// diffuse
-		TextureData* diffuse = fragment.dev_diffuseTex;
 		if (diffuse != NULL) {
 
 #if bilinearfiltering
@@ -485,6 +492,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 			int v = fragment.texcoord0.y * fragment.texHeight;
 			int uvid = u + v * fragment.texWidth;
 			framebuffer[index] = glm::vec3(diffuse[3 * uvid] / 255.f, diffuse[3 * uvid + 1] / 255.f, diffuse[3 * uvid + 2] / 255.f);
+
 #endif
 		}
 		else {
@@ -506,15 +514,19 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
 #else
 		framebuffer[index] = fragment.color;
+
 #endif
 
 #if depthtest
 		framebuffer[index] = glm::vec3(fragment.pos.z);
 #endif
 
+		if (diffuse != NULL) {
+
 #if normaltest
-		framebuffer[index] = (fragment.eyeNor + glm::vec3(1.0f)) / 2.0f;
+			framebuffer[index] = (fragment.eyeNor + glm::vec3(1.0f)) / 2.0f;
 #endif
+		}
 
 	}
 }
@@ -980,11 +992,19 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	checkCUDAError("init depth");
 
+#if timeranalysis
+	timer().startGpuTimer();
+#endif
+
 	// TODO: rasterize
 	dim3 numThreadsPerBlock(blocksize < totalNumPrimitives ? blocksize : totalNumPrimitives);
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 	_rasterize << <numBlocksForPrimitives, numThreadsPerBlock >> > (totalNumPrimitives, width, height, dev_primitives, dev_fragmentBuffer, dev_depth);
 	checkCUDAError("rasterize");
+
+#if timeranalysis
+	timer().endGpuTimer();
+#endif
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
