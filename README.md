@@ -1,21 +1,26 @@
 CUDA Rasterizer
 ===============
 
-[CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
+[CLICK ME FOR PROJECT INSTRUCTIONS](./INSTRUCTION.md)
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
+* Salaar Kohari
+  * LinkedIn ([https://www.linkedin.com/in/salaarkohari](https://www.linkedin.com/in/salaarkohari))
+  * Website ([http://salaar.kohari.com](http://salaar.kohari.com))
+  * University of Pennsylvania, CIS 565: GPU Programming and Architecture
+* Tested on: Windows 10, Intel Xeon @ 3.7GHz 32GB, GTX 1070 8GB (SIG Lab)
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+### Introduction
+My GPU rasterizer produces real-time renders of complex geometry. Scene data is loaded from gltf file format.
 
-### (TODO: Your README)
+### Algorithm
+1. Initialize array of paths (project a ray from camera through each pixel)
+2. Compute intersection with ray along its path
+3. Stream compaction to remove terminated paths (optional)
+4. Shade rays that intersected something using reflect, refract, or diffuse lighting to multiply with the current color of the ray
+5. Repeat steps 2-4 until max bounces reached or all paths terminated
+6. Add iteration results to the image, repeating steps 1-5 until max iterations reached
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+### Images
 
 
-### Credits
-
-* [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
-* [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
+### Analysis
