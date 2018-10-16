@@ -22,8 +22,11 @@ For this project, I implemented most of the graphics pipeline for a rasterizer u
 - Textures with bilinear interpolation
 
 ## Anti-aliasing
-![](renders/10-13-04-23-tri-noAA.PNG)
-![](renders/10-13-04-22-tri-aa.PNG)
+
+Without Anti-Aliasing             |  With Anti-Aliasing
+:-------------------------:|:-------------------------:
+![](renders/10-13-04-23-tri-noAA.PNG)  |  ![](renders/10-13-04-23-tri-noAA.PNG)
+
 Images without and with 2x anti-aliasing  
 
 Supersampling anti-aliasing was implemented to improve the visual result. The implementation is typical, rendering the image at a larger resolution before shrinking it down to the desired image side. It was tested with 2x anti-aliasing with each dimension of the image doubled. The results are shown below.  
@@ -35,11 +38,16 @@ Zoomed in comparison without and with anti-aliasing
 ![](renders/10-14-3-50-cow-colorInterp.PNG)  
 A render of a cow with randomly assigned colors  
 
-
+If a primitive does not have a texture assigned to it, the rasterizer gives each vertex a random color. When calculating the color of a fragment, it uses perspective correct interpolation to interpolate a color from the three vertices. The results are shown in the cow above.  
 
 ## Textures and bilinear interpolation
 ![](renders/10-14-12-58-checkerboard-bilinear.PNG)  
-A checkerboard texture using bilinear interpolation
+A checkerboard texture using bilinear interpolation  
+
+Texturing was implemented by using perspective correct interpolation to interpolate UV coordinates. However, using the texture color at the corresponding UV may not be accurate because pixels are discrete while UV coordinates are not. Therefore, a bilinear interpolation is performed using the surrounding pixels. The result is shown in the checkerboard above and the truck below.  
+
+![](renders/10-15-02-20-truck.PNG)  
+A truck with Cesium textures  
 
 ## Performance Analysis
 All analysis was gathered using the duck scene.  
