@@ -24,6 +24,7 @@
 #include <util/utilityCore.hpp>
 
 #include "rasterize.h"
+#include "image.h"
 
 using namespace std;
 
@@ -102,3 +103,5 @@ std::string getFilePathExtension(const std::string &FileName);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos);
 void mouseWheelCallback(GLFWwindow* window, double xoffset, double yoffset);
+
+void saveImage();

@@ -41,6 +41,7 @@ set(CORELIBS
 # Enable C++11 for host code
 set(CMAKE_CXX_STANDARD 11)
 
+
 # Set up different build configurations
 set(CMAKE_CONFIGURATION_TYPES Debug;RelWithDebInfo;Release
     CACHE STRING "Set configuration types" FORCE)

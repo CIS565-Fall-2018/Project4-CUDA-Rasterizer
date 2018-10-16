@@ -10,9 +10,36 @@
 
 #include "main.hpp"
 
+
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYGLTF_LOADER_IMPLEMENTATION
 #include <util/tiny_gltf_loader.h>
+#include <vector>
+#include <string>
+#include <ctime>
+
+std::vector<glm::vec3> finalimage;
+std::string filename;
+std::string startTimeString;
+
+std::string currentTimeString() {
+	time_t now;
+	time(&now);
+	char buf[sizeof "0000-00-00_00-00-00z"];
+	strftime(buf, sizeof buf, "%Y-%m-%d_%H-%M-%Sz", gmtime(&now));
+	return std::string(buf);
+}
+
+std::string getfilename(std::string input) {
+	std::size_t found1 = input.find_last_of('/');
+	std::size_t found2 = input.find_last_of('.');
+	if (found1 != std::string::npos && found2 != std::string::npos) {
+		return input.substr(found1 + 1, found2 - found1 - 1);
+	}
+	else {
+		return "NaN";
+	}
+}
 
 //-------------------------------
 //-------------MAIN--------------
@@ -30,6 +57,7 @@ int main(int argc, char **argv) {
 	std::string err;
 	std::string input_filename(argv[1]);
 	std::string ext = getFilePathExtension(input_filename);
+
 
 	bool ret = false;
 	if (ext.compare("glb") == 0) {
@@ -56,6 +84,11 @@ int main(int argc, char **argv) {
 
     // Launch CUDA/GL
     if (init(scene)) {
+
+		//initialize image and file info
+		finalimage.resize(width * height);
+		filename = getfilename(input_filename);
+
         // GLFW main loop
         mainLoop();
     }
@@ -94,6 +127,34 @@ void mainLoop() {
 }
 
 //-------------------------------
+//----------SAVE IMAGE-----------
+//-------------------------------
+void saveImage() {
+
+	startTimeString = currentTimeString();
+
+	// output image file
+	image img(width, height);
+
+	for (int x = 0; x < width; x++) {
+		for (int y = 0; y < height; y++) {
+			int index = x + (y * width);
+			glm::vec3 pix = finalimage[index];
+			img.setPixel(width - 1 - x, y, glm::vec3(pix));
+		}
+	}
+
+	std::string filen = filename;
+	std::ostringstream ss;
+	ss << filen << "." << startTimeString;
+	filen = ss.str();
+
+	// CHECKITOUT
+	img.savePNG(filen);
+	//img.saveHDR(filename);  // Save a Radiance HDR file
+}
+
+//-------------------------------
 //---------RUNTIME STUFF---------
 //-------------------------------
 float scale = 1.0f;
@@ -120,7 +181,7 @@ void runCuda() {
 	glm::mat4 MVP = P * MV;
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal);
+	rasterize(dptr, MVP, MV, MV_normal, finalimage);
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
@@ -327,7 +388,10 @@ void errorCallback(int error, const char *description) {
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
-    }
+	}
+	else if (key == GLFW_KEY_S && action == GLFW_PRESS) {
+		saveImage();
+	}
 }
 
 //----------------------------
