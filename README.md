@@ -5,13 +5,28 @@ CUDA Rasterizer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Wanru Zhao
+  * [LinkedIn](www.linkedin.com/in/wanru-zhao).
+* Tested on: Windows 10, Intel(R) Core(TM) i7-8750H CPU@2.2GHz, GTX 1070 with Max-Q Design(Personal Laptop)
 
-### (TODO: Your README)
+### Final
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+### Features
+#### Basic Features
+- Vertex shading
+- Primitive assembly with different primitive modes
+- Rasterization
+- A depth buffer for storing and depth testing fragments
+- Fragment-to-depth-buffer writing (with atomics for race avoidance)
+- Fragment shading (lambert and blinn-phong)
+#### Extra Features
+- Backface culling
+- Correct color interpolation between points on a primitive
+- UV texture mapping with bilinear texture filtering and perspective correct texture coordinates
+- Support for rasterizing additional primitives: lines and points
+
+### Performance Analysis
+
 
 
 ### Credits
