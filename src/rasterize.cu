@@ -30,7 +30,6 @@
 #define OPTION_ENABLE_BACK_FACE_CULLING	0
 #define OPTION_SELECT_MODE				MODE_TRIANGLE
 
-#define RANDOM_SEED					1337L
 #define SSAA_GRID_AREA				OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE
 
 namespace {
@@ -131,26 +130,6 @@ static int * dev_depth = NULL;	// you might need this buffer when doing depth te
 //Additional globals
 static int * dev_mutex = NULL; //int []
 
-/*
-//From https://stackoverflow.com/a/1855465/3421536
-static int imin = std::numeric_limits<int>::min(); // minimum value
-static int imax = std::numeric_limits<int>::max();
-
-//Allow min/max from __device__ functions
-//From https://stackoverflow.com/a/45516170/3421536
-#define __df__ __device__ __forceinline__
-template <typename T> __df__ T maximum(T x, T y);
-template <> __df__ int                 maximum<int               >(int x, int y)                               { return max(x,y);    }
-template <> __df__ unsigned int        maximum<unsigned          >(unsigned int x, unsigned int y)             { return umax(x,y);   }
-template <> __df__ long                maximum<long              >(long x, long y)                             { return llmax(x,y);  }
-template <> __df__ unsigned long       maximum<unsigned long     >(unsigned long x, unsigned long y)           { return ullmax(x,y); }
-template <> __df__ long long           maximum<long long         >(long long x, long long y)                   { return llmax(x,y);  }
-template <> __df__ unsigned long long  maximum<unsigned long long>(unsigned long long x, unsigned long long y) { return ullmax(x,y); }
-template <> __df__ float               maximum<float             >(float x, float y)                           { return fmaxf(x,y);  }
-template <> __df__ double              maximum<double            >(double x, double y)                         { return fmax(x,y);   }
-#undef __df__
-*/
-
 // Generates a random float between A and B
 // From https://stackoverflow.com/a/24537113/3421536
 // See also: https://stackoverflow.com/a/25034092/3421536
@@ -168,6 +147,7 @@ int generateRandomInt(int A, int B, float randu_f) {
 }
 
 /**
+ * From https://github.com/CIS565-Fall-2018/Project3-CUDA-Path-Tracer
  * Handy-dandy hash function that provides seeds for random number generation.
  */
 __host__ __device__ inline unsigned int utilhash(unsigned int a) {
@@ -180,6 +160,7 @@ __host__ __device__ inline unsigned int utilhash(unsigned int a) {
     return a;
 }
 
+// From https://github.com/CIS565-Fall-2018/Project3-CUDA-Path-Tracer
 __host__ __device__
 thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth) {
     int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
@@ -817,11 +798,7 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
 				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
 		}
-
-
-		// TODO: other primitive types (point, line)
 	}
-	
 }
 
 __device__
@@ -1017,11 +994,11 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
-	// TODO: rasterize
-	//Copied from code above, why 128?
+	// rasterize
+	// Copied from code above, why 128?
 	dim3 numThreadsPerBlock(128, 1, 1);
 	int primitiveBlockCount = (numThreadsPerBlock.x + totalNumPrimitives - 1) / numThreadsPerBlock.x;
-	//Launch primitive kernel
+	// Launch primitive kernel
 	rasterizePrimitive <<< primitiveBlockCount, numThreadsPerBlock >>>(
 			totalNumPrimitives,
 			dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex,
@@ -1031,7 +1008,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-	printf("TW, TH = %i, %i || %i, %i", trueWidth, trueHeight, width, height);
+	//printf("TW, TH = %i, %i || %i, %i", trueWidth, trueHeight, width, height);
     sendImageToPBO<<<trueBlockCount2d, blockSize2d>>>(pbo, width, height, trueWidth, trueHeight, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
 }
