@@ -18,11 +18,13 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define blockSize 128
-
-
 #define CORRECT_PROSPECTIVE 0
 #define TEXTURE_MAPPING 1
+#define LINE 1
+#define POINT 1
+#define TRIANGLE 1
+#define BACKFACE_CULLING 1
+#define SSAA_RES 2
 
 #ifndef imax
 #define imax(a, b) (((a) > (b)) ? (a) : (b))
@@ -70,6 +72,7 @@ namespace {
     struct Primitive {
         PrimitiveType primitiveType = Triangle;    // C++ 11 init
         VertexOut v[3];
+        bool cull = false;
     };
 
     struct Fragment {
@@ -111,7 +114,6 @@ namespace {
         // Vertex Out, vertex used for rasterization, this is changing every frame
         VertexOut *dev_verticesOut;
 
-        // TODO: add more attributes when needed
     };
 
 }
@@ -140,9 +142,16 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 
     if (x < w && y < h) {
         glm::vec3 color;
-        color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-        color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-        color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+        for (int i = 0; i < SSAA_RES; i++){
+            for(int j = 0; j < SSAA_RES; j++){
+                int ss_index = x * SSAA_RES + i + (y * SSAA_RES + j) * w * SSAA_RES;
+                color.x = glm::clamp(image[ss_index].x, 0.0f, 1.0f) * 255.0;
+                color.y = glm::clamp(image[ss_index].y, 0.0f, 1.0f) * 255.0;
+                color.z = glm::clamp(image[ss_index].z, 0.0f, 1.0f) * 255.0;
+            }
+        }
+        color /= (SSAA_RES * SSAA_RES);
+
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
         pbo[index].x = color.x;
@@ -213,7 +222,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
         glm::vec3 color = ambientColor + (diffuseTexture * lambertian + specular) * lightColor * lightPower;
 
         color = pow(color, glm::vec3(1.f / SCREENGAMMA));
-        
+
         framebuffer[index] = color;
     }
 }
@@ -222,8 +231,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
  * Called once at the beginning of the program to allocate memory.
  */
 void rasterizeInit(int w, int h) {
-    width = w;
-    height = h;
+    width = w * SSAA_RES;
+    height = h * SSAA_RES;
     cudaFree(dev_fragmentBuffer);
     cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
     cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -752,9 +761,27 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive *dev_
 
 }
 
+struct primitive_culling{
+    __host__ __device__ bool operator()(const Primitive & p){
+        return p.cull;
+    }
+};
 
-__global__ void _rasterizeTraingle(const int numPrims, const height, const width,
-                                   Primitive *dev_primitives, int *dev_depth, Fragment *dev_fragement) {
+// wikipedia back-face culling
+__global__ void _backfaceCulling (const int numPrims, Primitive* dev_primitives){
+    int index = threadIdx.x + (blockIdx.x * blockDim.x);
+    if (index < numPrims){
+        glm::vec3 v1 = dev_primitives[index].v[1].eyePos - dev_primitives[index].v[0].eyePos;
+        glm::vec3 v2 = dev_primitives[index].v[2].eyePos - dev_primitives[index].v[0].eyePos;
+        glm::vec3 normal = glm::cross(v1, v2);
+        dev_primitives[index].cull = normal.z < 0;
+    }
+}
+
+
+
+__global__ void _rasterizeTraingle(const int numPrims, const int height, const int width,
+                                   Primitive *dev_primitives, int *dev_depth, Fragment *dev_fragment) {
     int index = threadIdx.x + (blockIdx.x * blockDim.x);
     if (index < numPrims) {
         Primitive curr_prim = dev_primitives[i];
@@ -764,7 +791,7 @@ __global__ void _rasterizeTraingle(const int numPrims, const height, const width
         AABB curr_box = getAABBForTriangle(tri);
 
         /* reference: cis 460 slides
-         * scratchpixel.com perspective correct interpolation vertex attributes
+         * scratchpixel.com perspective correct interpolation vertex attributes & wikipedia texture mapping
         */
         for (int i = imax(curr_box.min.x, 0); i < imin(curr_box.max.x, width); i++) {
             for (int j = imax(curr_box.min.y, 0); j < imin(curr_box.max.y, height); j++) {
@@ -775,55 +802,47 @@ __global__ void _rasterizeTraingle(const int numPrims, const height, const width
                     atomicMin(&dev_depth[index], depth);
 
                     if (depth == dev_depth[index]) {
-#if CORRECT_PROSPECTIVE
-                        float z = computeOneOverZ(bary_coord, tri);
-                        glm::vec3 eyeNorm[3] = {glm::vec3(curr_prim.v[0].eyeNor),
-                                                glm::vec3(curr_prim.v[1].eyeNor), glm::vec3(curr_prim.v[2].eyeNor)};
+                        dev_fragment[index].eyeNor = glm::normalize(bary_coord.x * curr_prim.v[0].eyeNor
+                                                                     + bary_coord.y * curr_prim.v[1].eyeNor +
+                                                                     bary_coord.z * curr_prim.v[2].eyeNor;
+                        dev_fragment[index].color = bary_coord.x * curr_prim.v[0].col
+                                                     + bary_coord.y * curr_prim.v[1].col +
+                                                     bary_coord.z * curr_prim.v[2].col;
 
+                        dev_fragment[index].eyePos = bary_coord.x * curr_prim.v[0].eyePos
+                                                      + bary_coord.y * curr_prim.v[1].eyePos +
+                                                      bary_coord.z * curr_prim.v[2].eyePos;
+
+
+#if CORRECT_PROSPECTIVE
                         glm::vec3 eyePosition[3] = {glm::vec3(curr_prim.v[0].eyePos),
                                                     glm::vec3(curr_prim.v[1].eyePos), glm::vec3(curr_prim.v[2].eyePos)};
 
-                        glm::vec3 color[3] = {glm::vec3(curr_prim.v[0].col),
-                                              glm::vec3(curr_prim.v[1].col), glm::vec3(curr_prim.v[2].col)};
+                        float z = computeOneOverZ(bary_coord, eyePosition);
 
                         glm::vec3 uv[3] = {glm::vec3(curr_prim.v[0].texcoord0, 0.f),
                                                glm::vec3(curr_prim.v[1].texcoord0, 0.f),
                                                glm::vec3(curr_prim.v[2].texcoord0, 0.f)};
 
-                        dev_fragement[index].eyeNor = glm::normalize(correctCoordPerspective(z, bary_coord, tri, eyeNorm));
-                        dev_fragement[index].eyePos = correctCoordPerspective(z, bary_coord, tri, eyePosition);
-                        dev_fragement[index].color = correctCoordPerspective(z, bary_coord, tri, color);
-
                         if (curr_prim.v[0].dev_diffuseTex != NULL){
-                            dev_fragement[index].dev_diffuseTex = curr_prim.v[0].dev_diffuseTex;
-                            dev_fragement[index].texHeight = curr_prim.v[0].texHeight;
-                            dev_fragement[index].texWidth = curr_prim.v[0].texWidth;
-                            dev_fragement[index].texcoord0 = glm::vec2(correctCoordPerspective(z, bary_coord, tri, uv));
+                            dev_fragment[index].dev_diffuseTex = curr_prim.v[0].dev_diffuseTex;
+                            dev_fragment[index].texHeight = curr_prim.v[0].texHeight;
+                            dev_fragment[index].texWidth = curr_prim.v[0].texWidth;
+                            dev_fragment[index].texcoord0 = glm::vec2(correctCoordPerspective(z, bary_coord, tri, uv));
                         }else{
-                            dev_fragement[index].dev_diffuseTex = NULL;
+                            dev_fragment[index].dev_diffuseTex = NULL;
                         }
 
 #else
-
-                        dev_fragement[index].eyeNor = glm::normalize(bary_coord.x * curr_prim.v[0].eyeNor
-                                                                     + bary_coord.y * curr_prim.v[1].eyeNor +
-                                                                     bary_coord.z * curr_prim.v[2].eyeNor;
-                        dev_fragement[index].eyePos = bary_coord.x * curr_prim.v[0].eyePos
-                                                      + bary_coord.y * curr_prim.v[1].eyePos +
-                                                      bary_coord.z * curr_prim.v[2].eyePos;
-                        dev_fragement[index].color = bary_coord.x * curr_prim.v[0].col
-                                                     + bary_coord.y * curr_prim.v[1].col +
-                                                     bary_coord.z * curr_prim.v[2].col;
-
                         if (curr_prim.v[0].dev_diffuseTex != NULL) {
-                            dev_fragement[index].dev_diffuseTex = curr_prim.v[0].dev_diffuseTex;
-                            dev_fragement[index].texHeight = curr_prim.v[0].texHeight;
-                            dev_fragement[index].texWidth = curr_prim.v[0].texWidth;
-                            dev_fragement[index].texcoord0 = bary_coord.x * curr_prim.v[0].texcoord0
+                            dev_fragment[index].dev_diffuseTex = curr_prim.v[0].dev_diffuseTex;
+                            dev_fragment[index].texHeight = curr_prim.v[0].texHeight;
+                            dev_fragment[index].texWidth = curr_prim.v[0].texWidth;
+                            dev_fragment[index].texcoord0 = bary_coord.x * curr_prim.v[0].texcoord0
                                                              + bary_coord.y * curr_prim.v[1].texcoord0 +
                                                              bary_coord.z * curr_prim.v[2].texcoord0;
                         }else{
-                            dev_fragement[index].dev_diffuseTex = NULL;
+                            dev_fragment[index].dev_diffuseTex = NULL;
                         }
 #endif
                     }
@@ -836,11 +855,82 @@ __global__ void _rasterizeTraingle(const int numPrims, const height, const width
 
 // rasterization for points and lines
 // reference: http://www.cs.cornell.edu/courses/cs4620/2010fa/lectures/07pipeline.pdf
-//__global__ void _rasterizePoint() {
-//
-//}
-//
-//__global__ void _rasterizeLine() {}
+__global__ void _rasterizePoint(const int numPrims, const int height, const int width,
+                                   Primitive *dev_primitives,  Fragment *dev_fragment) {
+    int index = threadIdx.x + (blockIdx.x * blockDim.x);
+    if (index < numPrims){
+        Primitive curr_prim = dev_primitives[i];
+        glm::vec3 tri[3] = {glm::vec3(curr_prim.v[0].pos),
+                            glm::vec3(curr_prim.v[1].pos), glm::vec3(curr_prim.v[2].pos)};
+        for(int i = 0; i < 3; i++){
+            if (tri[i].x >= 0 && tri[i].x < width && tri[i].y >= 0 && tri[i].y < height)
+                dev_fragment[tri[i].y * width + tri[i].x].color = glm::vec3(0.8f, 0.8f, 0.8f);
+        }
+    }
+
+}
+
+
+__host__ __device__ void _bresenham(glm::vec3 pt1, glm::vec3 pt2, const int height, const int width,
+        Fragment *dev_fragment){
+    float x1 = glm::clamp(pt1[0], 0, width - 1);
+    float x2 = glm::clamp(pt2[0], 0, width - 1);
+    float y1 = glm::clamp(pt1[1], 0, height - 1);
+    float y2 = glm::clamp(pt2[1], 0, height - 1);
+    const glm::vec3 color(0.8f, 0.8f, 0.8f);
+
+    bool swapped = (fabs(x2 - x1) < fabs(y2 - y1));
+
+    if (swapped){
+        swap(x1, y1);
+        swap(x2, y2);
+    }
+
+    if (x1 > x2) {
+        swap(x1, x2);
+        swap(y1, y2);
+    }
+
+    const float dx = x2 - x1;
+    const float dy = fabs(y2 - y1);
+
+    float err = dx / 2.0f;
+    const int step_size = (y1 < y2) ? 1: -1;
+
+    int idx;
+
+    for (int x = (int)x1; x < (int)x2; x++){
+        if (swapped) {
+            int idx = y + x * width;
+            dev_fragment[idx] = color;
+        }
+        else {
+            int idx = x + y * width;
+            dev_fragment[idx] = color;
+        }
+        err -= dy;
+        if (err < 0){
+            y += step_size;
+            err += dx;
+        }
+    }
+
+}
+
+
+__global__ void _rasterizeLine(const int numPrims, const int height, const int width,
+                               Primitive *dev_primitives,  Fragment *dev_fragment) {
+    int index = threadIdx.x + (blockIdx.x * blockDim.x);
+    if (index < numPrims){
+        Primitive curr_prim = dev_primitives[i];
+        glm::vec3 tri[3] = {glm::vec3(curr_prim.v[0].pos),
+                            glm::vec3(curr_prim.v[1].pos), glm::vec3(curr_prim.v[2].pos)};
+
+        _bresenham(tri[0], tri[1], height, width, dev_fragment);
+        _bresenham(tri[0], tri[2], height, width, dev_fragment);
+        _bresenham(tri[1], tri[2], height, width, dev_fragment);
+
+}
 
 
 /**
@@ -853,12 +943,12 @@ void rasterize(uchar4 *pbo, const glm::mat4 &MVP, const glm::mat4 &MV, const glm
                       (height - 1) / blockSize2d.y + 1);
 
     // Execute your rasterization pipeline here
+    dim3 numThreadsPerBlock(128);
     // (See README for rasterization pipeline outline.)
 
     // Vertex Process & primitive assembly
     {
         curPrimitiveBeginId = 0;
-        dim3 numThreadsPerBlock(128);
 
         auto it = mesh2PrimitivesMap.begin();
         auto itEnd = mesh2PrimitivesMap.end();
@@ -893,10 +983,28 @@ void rasterize(uchar4 *pbo, const glm::mat4 &MVP, const glm::mat4 &MV, const glm
 
     // TODO: rasterize
 
-    dim3 numBlocksForPrimitives((totalNumPrimitives + blockSize - 1) / blockSize);
-    _rasterizeTraingle << < numBlocksForPrimitives, blockSize >> >
-                                                    totalNumPrimitives, height, width, dev_primitives, dev_depth, dev_fragmentBuffer);
+    dim3 numBlocksForPrimitives((curPrimitiveBeginId + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
+#if TRIANGLE && BACKFACE_CULLING
+    _backfaceCulling <<< numBlocksForPrimitives, numThreadsPerBlock >>> (curPrimitiveBeginId, dev_primitives);
+    Primitive* culled_primitives = thrust::partition(thrust::device, dev_primitives,
+            dev_primitives + curPrimitiveBeginId, primitive_culling());
+    curPrimitiveBeginId = (int)(culled_primitives - dev_primitives);
+#endif
+
+
+#if POINT
+    _rasterizePoint <<< numBlocksForPrimitives, numThreadsPerBlock >>> (curPrimitiveBeginId, height, width,
+            dev_primitives, dev_fragmentBuffer);
+
+#elseif LINE
+    _rasterizeLine <<< numBlocksForPrimitives, numThreadsPerBlock >>> (curPrimitiveBeginId,  height, width,
+            dev_primitives,  dev_fragmentBuffer);
+
+#elseif TRIANGLE
+    _rasterizeTraingle <<< numBlocksForPrimitives, numThreadsPerBlock >>> (curPrimitiveBeginId, height, width,
+            dev_primitives, dev_depth, dev_fragmentBuffer);
+#endif
 
 
     // Copy depthbuffer colors into framebuffer
