@@ -1,5 +1,8 @@
 CUDA Rasterizer
+
 ===============
+    
+**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
 * Henry Zhu
   * [Github](https://github.com/Maknee), [LinkedIn](https://www.linkedin.com/in/henry-zhu-347233121/), [personal website](https://maknee.github.io/), [twitter](https://twitter.com/maknees1), etc.
