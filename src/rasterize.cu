@@ -18,7 +18,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define BILINEAR 0
+#define BILINEAR 1
 
 namespace {
 
@@ -635,6 +635,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 
 	}
 	
+    printf("Num primitives: %u\n", totalNumPrimitives);
 
 	// 3. Malloc for dev_primitives
 	{
@@ -842,7 +843,7 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
                                     glm::vec3 col_interp1 = glm::mix(col_00, col_10, u_fract);
                                     glm::vec3 col_interp2 = glm::mix(col_01, col_11, u_fract);
 
-                                    glm::vec3 final_col = glm::mix(col_interp1, col_interp2, v_fract);
+                                    glm::vec3 final_col = glm::mix(col_interp1, col_interp2, v_fract) / 255.f;
 #else
                                     glm::vec3 final_col = glm::vec3(tex[(u_i + (v_i * p.v[0].texWidth)) * 3],
                                                                     tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 1],
