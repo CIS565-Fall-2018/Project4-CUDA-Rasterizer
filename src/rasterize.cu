@@ -147,17 +147,21 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 	if (x < w && y < h) {
 		Fragment f = fragmentBuffer[index];
 
+		// lambertian lighting
 		float diffuseLight = glm::dot(glm::normalize(f.eyeNor), glm::vec3(0.0f, 1.0f, 0.0f)) + 0.2f; // 0.2f is ambient
 		if (diffuseLight > 1) diffuseLight = 1.0f;
 		if (diffuseLight < 0) diffuseLight = 0.0f;
 
-		/*if (f.dev_diffuseTex != NULL) {
-			int tex_idx = 4 * (f.texcoord0.x);
+		// apply texture color
+		if (f.dev_diffuseTex != NULL) {
+			int tex_x = f.texcoord0.x * (f.texWidth - 1);
+			int tex_y = f.texcoord0.y * (f.texHeight - 1);
 			
 			glm::vec3 tex_col;
 
-			if (tex_idx > (3 * f.texWidth * f.texHeight - 1) || tex_idx < 0) tex_col = glm::vec3(256.0f, 0.0f, 0.0f);
+			if (tex_y > (f.texHeight - 1) || tex_y < 0 || tex_x >(f.texWidth - 1) || tex_x < 0) tex_col = glm::vec3(256.0f, 0.0f, 0.0f);
 			else {
+				int tex_idx = 3 * (tex_x + f.texWidth * tex_y);
 				tex_col.x = f.dev_diffuseTex[tex_idx];
 				tex_col.y = f.dev_diffuseTex[tex_idx + 1];
 				tex_col.z = f.dev_diffuseTex[tex_idx + 2];
@@ -166,9 +170,9 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 			
 			framebuffer[index] = tex_col / 256.0f * diffuseLight;
 		}
-		else {*/
+		else {
 			framebuffer[index] = fragmentBuffer[index].color * diffuseLight;
-		//}
+		}
 
 		// TODO: add your fragment shader code here
 
