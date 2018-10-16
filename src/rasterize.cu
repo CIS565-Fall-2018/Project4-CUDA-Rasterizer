@@ -19,11 +19,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <math.h>
-#include <curand_kernel.h>
 
-#define OPTION_ENABLE_LAMBERT		0
-#define OPTION_ENABLE_SSAA			1
-#define OPTION_SSAA_GRID_SIZE 		2
+#define OPTION_ENABLE_LAMBERT			0
+#define OPTION_ENABLE_SSAA				0
+#define OPTION_SSAA_GRID_SIZE 			2
+#define OPTION_ENABLE_BACK_FACE_CULLING	1
 
 #define RANDOM_SEED					1337L
 #define SSAA_GRID_AREA				OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE
@@ -817,6 +817,13 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
+__device__
+void xyz(glm::vec4 * v4, glm::vec3 * v3) {
+	v3->x = v4->x;
+	v3->y = v4->y;
+	v3->z = v4->z;
+}
+
 __global__ void rasterizePrimitive (
 			int N,
 			Primitive * dev_primitives, Fragment * dev_fragmentBuffer,
@@ -824,6 +831,24 @@ __global__ void rasterizePrimitive (
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if (idx >= N) { return; }
+
+#if OPTION_ENABLE_BACK_FACE_CULLING
+	//https://en.wikipedia.org/wiki/Back-face_culling
+	//Convert from vec4 for vec3
+	glm::vec3 p0(0);
+	glm::vec3 p1(0);
+	glm::vec3 p2(0);
+	xyz(&dev_primitives[idx].v[0].pos, &p0);
+	xyz(&dev_primitives[idx].v[1].pos, &p1);
+	xyz(&dev_primitives[idx].v[2].pos, &p2);
+
+	//Back culling calculation
+	glm::vec3 _N = glm::cross(p1 - p0, p2 - p0);
+	float backface_check = glm::dot(p0 - dev_primitives[idx].v[0].eyePos, _N);
+	if (backface_check >= 0) {
+		return;
+	}
+#endif
 
 	//Triangle, defined by three points, used to get AABB
 	glm::vec3 points[3];
