@@ -27,18 +27,18 @@ glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
 
 // CHECKITOUT
 /**
- * Finds the axis aligned bounding box for a given triangle.
+ * Finds the axis aligned bounding box for a given triangle, clamped within 0 - screenbound
  */
 __host__ __device__ static
-AABB getAABBForTriangle(const glm::vec3 tri[3]) {
+AABB getAABBForTriangle(const glm::vec3 tri[3], float width, float height) {
     AABB aabb;
     aabb.min = glm::vec3(
-            min(min(tri[0].x, tri[1].x), tri[2].x),
-            min(min(tri[0].y, tri[1].y), tri[2].y),
+            max(min(min(tri[0].x, tri[1].x), tri[2].x), 0.0f),
+			max(min(min(tri[0].y, tri[1].y), tri[2].y), 0.0f),
             min(min(tri[0].z, tri[1].z), tri[2].z));
     aabb.max = glm::vec3(
-            max(max(tri[0].x, tri[1].x), tri[2].x),
-            max(max(tri[0].y, tri[1].y), tri[2].y),
+            min(max(max(tri[0].x, tri[1].x), tri[2].x), width),
+            min(max(max(tri[0].y, tri[1].y), tri[2].y), height),
             max(max(tri[0].z, tri[1].z), tri[2].z));
     return aabb;
 }
