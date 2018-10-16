@@ -147,12 +147,12 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 	if (x < w && y < h) {
 		Fragment f = fragmentBuffer[index];
 
-		float diffuseLight = glm::dot(glm::normalize(f.eyeNor), glm::vec3(0.0f, -1.0f, 0.0f)) + 0.2f; // 0.2f is ambient
+		float diffuseLight = glm::dot(glm::normalize(f.eyeNor), glm::vec3(0.0f, 1.0f, 0.0f)) + 0.2f; // 0.2f is ambient
 		if (diffuseLight > 1) diffuseLight = 1.0f;
 		if (diffuseLight < 0) diffuseLight = 0.0f;
 
 		/*if (f.dev_diffuseTex != NULL) {
-			int tex_idx = 3 * (f.texcoord0.x) * f.texHeight;
+			int tex_idx = 4 * (f.texcoord0.x);
 			
 			glm::vec3 tex_col;
 
@@ -164,7 +164,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
 			}
 			
-			framebuffer[index] = tex_col / 256.0f;
+			framebuffer[index] = tex_col / 256.0f * diffuseLight;
 		}
 		else {*/
 			framebuffer[index] = fragmentBuffer[index].color * diffuseLight;
@@ -675,7 +675,7 @@ void _vertexTransformAndAssembly(
 		vOut.pos = MVP * glm::vec4(primitive.dev_position[vid], 1.0f);
 		vOut.pos /= vOut.pos.w;
 		vOut.pos.x = 0.5f * (float)width * (vOut.pos.x + 1.0f);
-		vOut.pos.y = 0.5f * (float)height * (vOut.pos.y + 1.0f);
+		vOut.pos.y = 0.5f * (float)height * (1.0f - vOut.pos.y);
 
 		// eye-space pos
 		vOut.eyePos = glm::vec3(MV * glm::vec4(primitive.dev_position[vid], 1.0f));
@@ -743,8 +743,7 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 
 	// triangle vertex positions
 	glm::vec3 tri[3] = { glm::vec3(p.v[0].pos), glm::vec3(p.v[1].pos), glm::vec3(p.v[2].pos) };
-	//glm::vec3 tri_uv[3] = { glm::vec3(p.v[0].texcoord0, 1.0f), glm::vec3(p.v[1].texcoord0, 1.0f),glm::vec3(p.v[2].texcoord0, 1.0f) };
-	//glm::vec2 tri_uv[3] = { p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0 };
+	glm::vec2 tri_uv[3] = { p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0 };
 	glm::vec3 tri_norm[3] = { p.v[0].eyeNor,  p.v[1].eyeNor,  p.v[2].eyeNor };
 	//glm::vec3 tri_eye[3] = { p.v[0].eyePos,  p.v[1].eyePos,  p.v[2].eyePos };
 
@@ -791,7 +790,7 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 			inside = isBarycentricCoordInBounds(bary);
 
 			// depth buffer
-			z_float = 1 + getZAtCoordinate(bary, tri);
+			z_float = -getZAtCoordinate(bary, tri);
 			if (z_float < 0 || z_float > 1) continue;
 
 			z = z_float * INT_MAX;
@@ -814,9 +813,7 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 							fragBuf[f_idx] = f_true;
 
 							// generate interpolated attributes
-							//bary = calculateBarycentricCoordinate(tri_uv, glm::vec2(x, y));
-							//fragBuf[f_idx].texcoord0 = glm::vec2(bary.x, bary.y);
-							//fragBuf[f_idx].texcoord0 = z_float * ((tri_uv[0] * bary.x / tri[0].z) + (tri_uv[1] * bary.y / tri[1].z) + (tri_uv[2] * bary.z / tri[2].z));
+							fragBuf[f_idx].texcoord0 = z_float * ((tri_uv[0] * bary.x / tri[0].z) + (tri_uv[1] * bary.y / tri[1].z) + (tri_uv[2] * bary.z / tri[2].z));
 							fragBuf[f_idx].eyeNor = z_float * ((tri_norm[0] * bary.x / tri[0].z) + (tri_norm[1] * bary.y / tri[1].z) + (tri_norm[2] * bary.z / tri[2].z));
 							//fragBuf[f_idx].eyePos = z_float * ((tri_eye[0] * bary.x / tri[0].z) + (tri_eye[1] * bary.y / tri[1].z) + (tri_eye[2] * bary.z / tri[2].z));
 						}
