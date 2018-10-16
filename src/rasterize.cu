@@ -18,6 +18,11 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define PAINT_NORMALS 1
+#define NO_LIGHTING 1
+#define WIREFRAME_MODE 1
+#define POINT_CLOUD_MODE 0
+
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -217,9 +222,7 @@ glm::vec3 genTextureColor(Fragment f) {
 		tex_col += (temp * v_ratio * u_ratio);
 
 	}
-
 	tex_col = tex_col / 255.0f;
-
 	return tex_col;
 }
 
@@ -240,11 +243,17 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 		if (diffuseLight > 1) diffuseLight = 1.0f;
 		if (diffuseLight < 0) diffuseLight = 0.0f;
 
+		if (NO_LIGHTING) diffuseLight = 1.0f;
+
+		if (PAINT_NORMALS) {
+			framebuffer[index] = fragmentBuffer[index].eyeNor * diffuseLight;
+		}
 		// apply texture color
-		if (f.dev_diffuseTex != NULL) {
+		else if (f.dev_diffuseTex != NULL) {
 			
 			framebuffer[index] = genTextureColor(f) * diffuseLight;
 		}
+		
 		else {
 			framebuffer[index] = fragmentBuffer[index].color * diffuseLight;
 		}
@@ -773,7 +782,7 @@ void _vertexTransformAndAssembly(
 		}
 
 		// TODO: Apply vertex assembly here
-		// Assemble all attribute arraies into the primitive array
+		// Assemble all attribute arrays into the primitive array
 
 	}
 }
@@ -798,49 +807,43 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 			pid = iid / (int)primitive.primitiveType;
 			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
 				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+
+			dev_primitives[pid + curPrimitiveBeginId].primitiveType = Triangle;
 		}
 
 
 		// TODO: other primitive types (point, line)
+	/*	else if (primitive.primitiveMode == TINYGLTF_MODE_LINE) {
+
+		}
+
+		else if () {
+
+		}*/
 	}
 
 }
 
-__global__
-void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* depth, int* mutex, int width, int height) {
-	// index id
-	int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
-	if (idx > num_prim) return;
+__device__ 
+void rasterizeTriangle(Primitive p, Fragment* fragBuf, int* depth, int* mutex, int width, int height) {
 
-	Primitive p = primitives[idx];
-
-	Fragment f_true; //f_false;
+	Fragment f_true;
 	f_true.color = glm::vec3(1.0f); // default white
-
 	f_true.dev_diffuseTex = p.v[0].dev_diffuseTex;
 
 	if (f_true.dev_diffuseTex != NULL) {
 		f_true.texWidth = p.v[0].texWidth;
 		f_true.texHeight = p.v[0].texHeight;
 	}
-	
-
-	//f_false.color = glm::vec3(0.5f); // default grey
 
 	// triangle vertex positions
 	glm::vec3 tri[3] = { glm::vec3(p.v[0].pos), glm::vec3(p.v[1].pos), glm::vec3(p.v[2].pos) };
-	glm::vec3 tri_norm[3] = { p.v[0].eyeNor,  p.v[1].eyeNor,  p.v[2].eyeNor };
-	//glm::vec3 tri_eye[3] = { p.v[0].eyePos,  p.v[1].eyePos,  p.v[2].eyePos };
-
-
 
 	// backface culling
 	glm::vec3 normal = glm::cross(tri[1] - tri[0], tri[2] - tri[0]);
 	if (glm::dot(normal, glm::vec3(0.0f, 0.0f, 1.0f)) > 0) return;
 
-	AABB aabb;
-
-	aabb = getAABBForTriangle(tri);
+	AABB aabb = getAABBForTriangle(tri);
 
 	// if completely off screen return
 	if (aabb.max.y >= height && aabb.min.y >= height) return;
@@ -860,8 +863,6 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 	glm::vec3 bary;
 	bool inside = false;
 
-	glm::vec2 uv;
-
 	int z;
 	float z_float;
 	float w;
@@ -878,22 +879,16 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 			// depth buffer
 			z_float = getZAtCoordinate(bary, tri);
 			if (z_float < 0 || z_float > 1) continue;
-
 			z = z_float * INT_MAX;
 
 			w = 1.0f / ((bary.x / tri[0].z) + (bary.y / tri[1].z) + (bary.z / tri[2].z));
 
 			if (inside) {
-				//if (fragBuf[f_idx].color != f_true.color) fragBuf[f_idx] = f_false; // for testing
-
 				isSet = false;
-
 				do {
 					isSet = (atomicCAS(mutex + f_idx, 0, 1) == 0);
 					if (isSet) {
-						// Critical section goes here.
-						// The critical section MUST be inside the wait loop;
-						// if it is afterward, a deadlock will occur.
+						// Critical section
 						if (z < depth[f_idx]) {
 
 							depth[f_idx] = z;
@@ -901,22 +896,146 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 
 							// generate interpolated attributes
 							if (p.v[0].dev_diffuseTex != NULL) {
-								//glm::vec2 tri_uv[3] = { p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0 };
 								fragBuf[f_idx].texcoord0 = w * ((p.v[0].texcoord0 * bary.x / tri[0].z) + (p.v[1].texcoord0 * bary.y / tri[1].z) + (p.v[2].texcoord0 * bary.z / tri[2].z));
 							}
-							
-							fragBuf[f_idx].eyeNor = w * ((tri_norm[0] * bary.x / tri[0].z) + (tri_norm[1] * bary.y / tri[1].z) + (tri_norm[2] * bary.z / tri[2].z));
-							//fragBuf[f_idx].eyePos = z_float * ((tri_eye[0] * bary.x / tri[0].z) + (tri_eye[1] * bary.y / tri[1].z) + (tri_eye[2] * bary.z / tri[2].z));
+							fragBuf[f_idx].eyeNor = w * ((p.v[0].eyeNor * bary.x / tri[0].z) + (p.v[1].eyeNor * bary.y / tri[1].z) + (p.v[2].eyeNor * bary.z / tri[2].z));
 						}
-
 					}
 					if (isSet) {
 						mutex[f_idx] = 0;
 					}
 				} while (!isSet);
-
 			}
 		}
+	}
+
+}
+
+__device__
+void rasterizePoint(VertexOut v, Fragment* fragBuf, int* depth, int* mutex, int width) {
+	Fragment f;
+	f.color = glm::vec3(1.0f);
+	f.dev_diffuseTex = v.dev_diffuseTex;
+	if (f.dev_diffuseTex != NULL) {
+		f.texcoord0 = v.texcoord0;
+		f.texHeight = v.texHeight;
+		f.texWidth = v.texWidth;
+	}
+	f.eyeNor = v.eyeNor;
+	int f_idx = (int)v.pos.y * width + (int)v.pos.x;
+
+	bool isSet = false;
+
+	do {
+		isSet = (atomicCAS(mutex + f_idx, 0, 1) == 0);
+		if (isSet) {
+			// Critical section
+			if (v.pos.z < depth[f_idx]) {
+
+				depth[f_idx] = v.pos.z;
+				fragBuf[f_idx] = f;
+			}
+		}
+		if (isSet) {
+			mutex[f_idx] = 0;
+		}
+	} while (!isSet);
+
+}
+
+__device__
+void rasterizeLine(VertexOut v1, VertexOut v2, Fragment* fragBuf, int* depth, int* mutex, int width, int height) {
+	AABB aabb;
+	aabb.min = glm::vec3(min(v1.pos.x, v2.pos.x), min(v1.pos.y, v2.pos.y), min(v1.pos.z, v2.pos.z));
+	aabb.max = glm::vec3(max(v1.pos.x, v2.pos.x), max(v1.pos.y, v2.pos.y), max(v1.pos.z, v2.pos.z));
+
+	// if completely off screen return
+	if (aabb.max.y >= height && aabb.min.y >= height) return;
+	if (aabb.max.y < 0 && aabb.min.y < 0) return;
+
+	if (aabb.max.x >= width && aabb.min.x >= width) return;
+	if (aabb.max.x < 0 && aabb.min.x < 0) return;
+
+	// clamp bounds
+	if (aabb.max.y >= height) aabb.max.y = height - 1;
+	if (aabb.min.y < 0) aabb.min.y = 0;
+	if (aabb.max.x >= width) aabb.max.x = width - 1;
+	if (aabb.min.x < 0) aabb.min.x = 0;
+
+	int x;
+	float z;
+
+	float m = (v2.pos.y - v1.pos.y) / (v2.pos.x - v1.pos.x);
+	float a;
+
+	Fragment f;
+	f.color = glm::vec3(1.0f);
+
+	int f_idx;
+
+	for (int y = aabb.min.y; y <= aabb.max.y; y++) {
+		//get point x on line
+		x = (int)((y - v1.pos.y) / m) + (int)v1.pos.x;
+
+		// check bounds
+		if (x > aabb.max.x || x < aabb.min.x) continue;
+
+		a = (x - v1.pos.x) / (v2.pos.x - v1.pos.x);
+		f_idx = y * width + x;
+
+		z = 1.0f / ((a / v1.pos.z) + ((1-a) / v2.pos.z));
+
+		f.dev_diffuseTex = v1.dev_diffuseTex;
+		if (f.dev_diffuseTex != NULL) {
+			f.texcoord0 = z * ((a * v1.texcoord0 / v1.pos.z) + ((1 - a) * v2.texcoord0 / v2.pos.z));
+			f.texHeight = v1.texHeight;
+			f.texWidth = v1.texWidth;
+		}
+		f.eyeNor = z * ((a * v1.eyeNor / v1.pos.z) + ((1 - a) * v2.eyeNor / v2.pos.z));
+
+		bool isSet = false;
+
+		do {
+			isSet = (atomicCAS(mutex + f_idx, 0, 1) == 0);
+			if (isSet) {
+				// Critical section
+				if (z < depth[f_idx]) {
+
+					depth[f_idx] = z;
+					fragBuf[f_idx] = f;
+				}
+			}
+			if (isSet) {
+				mutex[f_idx] = 0;
+			}
+		} while (!isSet);
+	}
+
+}
+
+__global__
+void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* depth, int* mutex, int width, int height) {
+	// index id
+	int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (idx > num_prim) return;
+
+	Primitive p = primitives[idx];
+
+	if (POINT_CLOUD_MODE && p.primitiveType == Triangle) {
+		for (int i = 0; i < 3; i++) {
+			if (p.v[i].pos.x >= width || p.v[i].pos.y >= height) continue;
+			if (p.v[i].pos.x < 0 || p.v[i].pos.y < 0) continue;
+			rasterizePoint(p.v[i], fragBuf, depth, mutex, width);
+		}
+
+	}
+	else if (WIREFRAME_MODE && p.primitiveType == Triangle) {
+		rasterizeLine(p.v[0], p.v[1], fragBuf, depth, mutex, width, height);
+		rasterizeLine(p.v[0], p.v[2], fragBuf, depth, mutex, width, height);
+		rasterizeLine(p.v[1], p.v[2], fragBuf, depth, mutex, width, height);
+	}
+	else if (p.primitiveType == Triangle) {
+		rasterizeTriangle(p, fragBuf, depth, mutex, width, height);
 	}
 }
 
