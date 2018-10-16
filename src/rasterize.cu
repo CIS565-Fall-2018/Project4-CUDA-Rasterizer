@@ -688,11 +688,14 @@ void _vertexTransformAndAssembly(
 		vOut.eyeNor = MV_normal * primitive.dev_normal[vid];
 		vOut.eyeNor = glm::normalize(vOut.eyeNor);
 
-		vOut.texcoord0 = primitive.dev_texcoord0[vid];
 		vOut.dev_diffuseTex = primitive.dev_diffuseTex;
+		if (vOut.dev_diffuseTex != NULL) {
+			vOut.texcoord0 = primitive.dev_texcoord0[vid];
 
-		vOut.texHeight = primitive.diffuseTexHeight;
-		vOut.texWidth = primitive.diffuseTexWidth;
+
+			vOut.texHeight = primitive.diffuseTexHeight;
+			vOut.texWidth = primitive.diffuseTexWidth;
+		}
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
@@ -740,14 +743,17 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 	f_true.color = glm::vec3(1.0f); // default white
 
 	f_true.dev_diffuseTex = p.v[0].dev_diffuseTex;
-	f_true.texWidth = p.v[0].texWidth;
-	f_true.texHeight = p.v[0].texHeight;
+
+	if (f_true.dev_diffuseTex != NULL) {
+		f_true.texWidth = p.v[0].texWidth;
+		f_true.texHeight = p.v[0].texHeight;
+	}
+	
 
 	//f_false.color = glm::vec3(0.5f); // default grey
 
 	// triangle vertex positions
 	glm::vec3 tri[3] = { glm::vec3(p.v[0].pos), glm::vec3(p.v[1].pos), glm::vec3(p.v[2].pos) };
-	glm::vec2 tri_uv[3] = { p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0 };
 	glm::vec3 tri_norm[3] = { p.v[0].eyeNor,  p.v[1].eyeNor,  p.v[2].eyeNor };
 	//glm::vec3 tri_eye[3] = { p.v[0].eyePos,  p.v[1].eyePos,  p.v[2].eyePos };
 
@@ -817,7 +823,11 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 							fragBuf[f_idx] = f_true;
 
 							// generate interpolated attributes
-							fragBuf[f_idx].texcoord0 = z_float * ((tri_uv[0] * bary.x / tri[0].z) + (tri_uv[1] * bary.y / tri[1].z) + (tri_uv[2] * bary.z / tri[2].z));
+							if (p.v[0].dev_diffuseTex != NULL) {
+								//glm::vec2 tri_uv[3] = { p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0 };
+								fragBuf[f_idx].texcoord0 = z_float * ((p.v[0].texcoord0 * bary.x / tri[0].z) + (p.v[1].texcoord0 * bary.y / tri[1].z) + (p.v[2].texcoord0 * bary.z / tri[2].z));
+							}
+							
 							fragBuf[f_idx].eyeNor = z_float * ((tri_norm[0] * bary.x / tri[0].z) + (tri_norm[1] * bary.y / tri[1].z) + (tri_norm[2] * bary.z / tri[2].z));
 							//fragBuf[f_idx].eyePos = z_float * ((tri_eye[0] * bary.x / tri[0].z) + (tri_eye[1] * bary.y / tri[1].z) + (tri_eye[2] * bary.z / tri[2].z));
 						}
