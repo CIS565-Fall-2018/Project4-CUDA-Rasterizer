@@ -17,19 +17,23 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#define LAMBERT 0
-#define BLINN 1
+#include <chrono>
 
-#define POINT 1
+#define LAMBERT 1
+#define BLINN 0
+
+#define POINT 0
 #define TRI 0
-#define LINE 0
+#define LINE 1
 
-#define TEXTURE 0
+#define TEXTURE 1
 #define BILINEAR 1
 
 #define PERSP_CORRECT 1
 
-#define BACKCULL 1
+#define BACKCULL 0
+
+#define TIMER 0
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -60,6 +64,7 @@ namespace {
 		 TextureData* dev_diffuseTex = NULL;
 		 glm::vec3 camPos;
 		 int texWidth, texHeight;
+		 glm::vec3 mvpPos;
 		// ...
 	};
 
@@ -160,30 +165,36 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
         
 
 		// TODO: add your fragment shader code here
-		Fragment &fragment = fragmentBuffer[index];
+		Fragment fragment = fragmentBuffer[index];
 #if POINT || LINE 
 		framebuffer[index] = fragment.color;
 #elif LAMBERT
 		glm::vec3 v = fragment.eyePos;
 		glm::vec3 n = fragment.eyeNor;
 		glm::vec3 fragColor(1, 0, 0);
-		glm::vec3 lightPos(1, 1, 1);
+		glm::vec3 lightPos = glm::vec3(2, 2, 2) + v;
 		glm::vec3 L = glm::normalize(lightPos - v);
 		float lambert = glm::max(0.f, glm::dot(L, n));
-		framebuffer[index] = lambert * fragment.color;
+		glm::vec3 ambient = glm::vec3(0.1) * fragment.color;
+		framebuffer[index] = ambient + 0.9f * lambert * fragment.color;
 #elif BLINN
-		glm::vec3 v = fragment.eyePos;
-		glm::vec3 n = fragment.eyeNor;
-		glm::vec3 camPos = fragment.camPos;
-		glm::vec3 lightPos(1, 1, 1);
-		glm::vec3 L = glm::normalize(lightPos - v);
-		glm::vec3 Ev = glm::normalize(-v);
-		glm::vec3 R = glm::normalize(-glm::reflect(v - camPos, n));
-		float specular = glm::pow(glm::max(glm::dot(R, Ev), 0.f), 16.f);
-		float lambert = glm::max(0.f, glm::dot(L, n));
-		glm::vec3 diffuse = lambert * fragment.color;
-		framebuffer[index] = glm::clamp(diffuse*glm::vec3(0.7, 0.7, 0.7)
-			+ specular * glm::vec3(0.3, 0.3, 0.3), glm::vec3(0), glm::vec3(1));
+		glm::vec3 lights[2] = { glm::vec3(2, 2, 2) };
+		framebuffer[index] = glm::vec3(0.0f);
+		for (glm::vec3 lightPos : lights) {
+			glm::vec3 v = fragment.eyePos;
+			glm::vec3 n = glm::normalize(fragment.eyeNor);
+			glm::vec3 camPos = fragment.camPos;
+			glm::vec3 L = lightPos;
+			glm::vec3 Ev = glm::normalize(-v);
+			glm::vec3 R = glm::normalize(-glm::reflect(v - camPos, n));
+			glm::vec3 ambient = glm::vec3(0.1) * fragment.color;
+			float specular = glm::pow(glm::max(glm::dot(R, Ev), 0.f), 32.f);
+			float lambert = glm::max(0.f, glm::dot(L, n));
+			glm::vec3 diffuse = lambert * fragment.color;
+			framebuffer[index] += glm::clamp(ambient + diffuse*glm::vec3(0.7)
+				+ specular * glm::vec3(0.2), glm::vec3(0), glm::vec3(1));
+		}
+		
 #else
 		framebuffer[index] = fragment.color;
 #endif
@@ -344,10 +355,10 @@ __forceinline__ __device__ glm::vec3 baryPos(VertexOut *v, glm::vec3  barycentri
 	vert0 = v[0];
 	vert1 = v[1];
 	vert2 = v[2];
-	glm::vec3 p0 = vert0.eyePos * barycentric[0];
-	glm::vec3 p1 = vert1.eyePos * barycentric[1];
-	glm::vec3 p2 = vert2.eyePos * barycentric[2];
-	return p0 + p1 + p2;
+	glm::vec3 p0 = vert0.mvpPos * barycentric[0];
+	glm::vec3 p1 = vert1.mvpPos * barycentric[1];
+	glm::vec3 p2 = vert2.mvpPos * barycentric[2];
+	return p0 + p1 + p2;			  
 }
 
 __forceinline__ __device__ glm::vec3 baryNorm(VertexOut *v, glm::vec3  barycentric) {
@@ -375,20 +386,14 @@ __forceinline__ __device__ glm::vec2 baryUVs(VertexOut *v, glm::vec3  barycentri
 
 
 __forceinline__ __device__ glm::vec2 baryUVsPerspective(VertexOut *v, glm::vec3  barycentric) {
-	VertexOut vert0, vert1, vert2;
-	vert0 = v[0];
-	vert1 = v[1];
-	vert2 = v[2];
+	VertexOut v0, v1, v2;
+	v0 = v[0];
+	v1 = v[1];
+	v2 = v[2];
 
-	const float pc_z = 1.f /
-		(barycentric.x / vert0.eyePos.z
-			+ barycentric.y / vert1.eyePos.z
-			+ barycentric.z / vert2.eyePos.z);
-
-	glm::vec2 p0 = vert0.texcoord0 * barycentric[0] / vert0.eyePos.z;
-	glm::vec2 p1 = vert1.texcoord0 * barycentric[1] / vert1.eyePos.z;
-	glm::vec2 p2 = vert2.texcoord0 * barycentric[2] / vert2.eyePos.z;
-	return (p0 + p1 + p2) * pc_z;
+	glm::vec2 texCoordZ = barycentric.x * (v0.texcoord0 / v0.eyePos.z) + barycentric.y * (v1.texcoord0 / v1.eyePos.z) + barycentric.z * (v2.texcoord0 / v2.eyePos.z);
+	float coordZ = barycentric.x * (1.0f / v0.eyePos.z) + barycentric.y * (1.0f / v1.eyePos.z) + barycentric.z * (1.0f / v2.eyePos.z);
+	return texCoordZ / coordZ;
 }
 
 __device__
@@ -408,7 +413,7 @@ __global__ void kernelRasterize(int totalNumPrimitives, Primitive *dev_primitive
 	v2 = glm::vec3(primitive.v[2].pos);
 	glm::vec3 triangle[3] = { v0, v1, v2 };
 #if BACKCULL
-	if (glm::dot(primitive.v->eyeNor, primitive.v->camPos - primitive.v->eyePos) < 0.0f) {
+	if (glm::dot(primitive.v->eyeNor, primitive.v->camPos - primitive.v->eyePos) < -1.f) {
 		return;
 	}
 #endif
@@ -469,11 +474,18 @@ for (int i = 0; i < 3; i++) {
 							Fragment &fragment = dev_fragmentBuffer[fragmentId];
 							fragment.eyeNor = baryNorm(primitive.v, barycentric);
 							fragment.eyePos = baryPos(primitive.v, barycentric);
-							
+							fragment.color = fragment.eyeNor;
+							fragment.color = glm::vec3(1.f);
 							fragment.camPos = primitive.v[0].camPos;
 #if PERSP_CORRECT
 							glm::vec2 uvs = baryUVsPerspective(primitive.v, barycentric);
 							fragment.texcoord0 = uvs;
+							auto v0 = primitive.v[0];
+							auto v1 = primitive.v[1];
+							auto v2 = primitive.v[2];
+							glm::vec2 texCoordZ = barycentric.x * (v0.texcoord0 / v0.eyePos.z) + barycentric.y * (v1.texcoord0 / v1.eyePos.z) + barycentric.z * (v2.texcoord0 / v2.eyePos.z);
+							float coordZ = barycentric.x * (1.0f / v0.eyePos.z) + barycentric.y * (1.0f / v1.eyePos.z) + barycentric.z * (1.0f / v2.eyePos.z);
+							fragment.texcoord0 = texCoordZ / coordZ;
 #else
 							glm::vec2 uvs = baryUVs(primitive.v, barycentric);
 							fragment.texcoord0 = uvs;
@@ -501,14 +513,15 @@ for (int i = 0; i < 3; i++) {
 							}
 #elif TEXTURE
 							if (primitive.v->dev_diffuseTex != NULL) {
-								float x = uvs[0] * primitive.v->texWidth;
-								float y = uvs[1] * primitive.v->texHeight;
+								float x = fragment.texcoord0[0] * primitive.v->texWidth;
+								float y = fragment.texcoord0[1] * primitive.v->texHeight;
 								TextureData *text = primitive.v->dev_diffuseTex;
 								int width = primitive.v->texWidth;
 								fragment.color = getColor(text, width, glm::floor(x), glm::floor(y));
 							}
+#else
+							//fragment.color = baryNorm(primitive.v, barycentric);
 #endif
-							fragment.color = baryNorm(primitive.v, barycentric);
 						}
 						dev_mutex[fragmentId] = 0;
 					}
@@ -869,16 +882,19 @@ void _vertexTransformAndAssembly(
 		mvpPos /= mvpPos.w;
 		mvpPos.x = 0.5f * float(width) * (mvpPos.x + 1.f);
 		mvpPos.y = 0.5f * float(height) * (1.f - mvpPos.y);
+		mvpPos.z = -mvpPos.z;
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
 		VertexOut &vo = primitive.dev_verticesOut[vid];
 		vo.pos = mvpPos;
-		vo.eyePos = glm::vec3(eyePos[0], eyePos[1], eyePos[2]);
+
+		vo.eyePos = glm::vec3(MV * objPos);//glm::vec3(eyePos[0], eyePos[1], eyePos[2]);
+		vo.mvpPos = glm::vec3(MVP * objPos);
 		vo.eyeNor = glm::normalize(MV_normal * primitive.dev_normal[vid]);
-		vo.camPos = glm::vec3(MVP * glm::vec4(0, 0, 0, 1));
-		vo.texcoord0 = primitive.dev_texcoord0[vid];
-		vo.dev_diffuseTex = primitive.dev_diffuseTex;
+		vo.camPos = glm::vec3(MV * glm::vec4(0, 0, 0, 1));
+		if (primitive.dev_texcoord0) vo.texcoord0 = primitive.dev_texcoord0[vid];
+		if (primitive.dev_diffuseTex) vo.dev_diffuseTex = primitive.dev_diffuseTex;
 		vo.texHeight = primitive.diffuseTexHeight;
 		vo.texWidth = primitive.diffuseTexWidth;
 	}
@@ -918,6 +934,11 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
  * Perform rasterization.
  */
 void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) {
+	using time_point_t = std::chrono::high_resolution_clock::time_point;
+	time_point_t start_time, end_time;
+	float elapsed_time;
+	std::chrono::duration<double, std::milli> dur;
+
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -933,6 +954,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
+		
 
 		for (; it != itEnd; ++it) {
 			auto p = (it->second).begin();	// each primitive
@@ -940,15 +962,37 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 			for (; p != pEnd; ++p) {
 				dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+				
 
+#if TIMER
+				start_time = std::chrono::high_resolution_clock::now();
+#endif
 				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height);
 				checkCUDAError("Vertex Processing");
 				cudaDeviceSynchronize();
+#if TIMER
+				cudaDeviceSynchronize();
+				end_time = std::chrono::high_resolution_clock::now();
+				dur = end_time - start_time;
+				elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+				std::cout << "vertex processing elapsed time: " << elapsed_time << "ms." << std::endl;
+#endif
+
+#if TIMER
+				start_time = std::chrono::high_resolution_clock::now();
+#endif
 				_primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
 					(p->numIndices, 
 					curPrimitiveBeginId, 
 					dev_primitives, 
 					*p);
+#if TIMER
+				cudaDeviceSynchronize();
+				end_time = std::chrono::high_resolution_clock::now();
+				dur = end_time - start_time;
+				elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+				std::cout << "primitive assembly elapsed time: " << elapsed_time << "ms." << std::endl;
+#endif
 				checkCUDAError("Primitive Assembly");
 
 				curPrimitiveBeginId += p->numPrimitives;
@@ -964,11 +1008,31 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	// TODO: rasterize
 	dim3 numThreadsPerBlock(128);
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+#if TIMER
+	start_time = std::chrono::high_resolution_clock::now();
+#endif
 	kernelRasterize << <numBlocksForPrimitives, numThreadsPerBlock >> > (totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex, width, height);
-
+#if TIMER
+	cudaDeviceSynchronize();
+	end_time = std::chrono::high_resolution_clock::now();
+	dur = end_time - start_time;
+	elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+	std::cout << "rasterize elapsed time: " << elapsed_time << "ms." << std::endl;
+#endif
 
     // Copy depthbuffer colors into framebuffer
+#if TIMER
+	start_time = std::chrono::high_resolution_clock::now();
+#endif
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
+#if TIMER
+	cudaDeviceSynchronize();
+	end_time = std::chrono::high_resolution_clock::now();
+	dur = end_time - start_time;
+	elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+	std::cout << "fragment shader elapsed time: " << elapsed_time << "ms." << std::endl;
+#endif
+
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
     sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
