@@ -20,7 +20,7 @@
 
 #define PAINT_NORMALS 1
 #define NO_LIGHTING 1
-#define WIREFRAME_MODE 1
+#define WIREFRAME_MODE 0
 #define POINT_CLOUD_MODE 0
 
 namespace {
@@ -813,13 +813,20 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 
 		// TODO: other primitive types (point, line)
-	/*	else if (primitive.primitiveMode == TINYGLTF_MODE_LINE) {
+		else if (primitive.primitiveMode == TINYGLTF_MODE_LINE) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
 
+			dev_primitives[pid + curPrimitiveBeginId].primitiveType = Line;
 		}
 
-		else if () {
+		else if (primitive.primitiveMode == TINYGLTF_MODE_POINTS) {
+			pid = iid;
+			dev_primitives[pid + curPrimitiveBeginId].v[0] = primitive.dev_verticesOut[primitive.dev_indices[iid]];
 
-		}*/
+			dev_primitives[pid + curPrimitiveBeginId].primitiveType = Point;
+		}
 	}
 
 }
@@ -1036,6 +1043,14 @@ void _rasterizer(int num_prim, Primitive* primitives, Fragment* fragBuf, int* de
 	}
 	else if (p.primitiveType == Triangle) {
 		rasterizeTriangle(p, fragBuf, depth, mutex, width, height);
+	}
+	else if (p.primitiveType == Point) {
+		if (p.v[0].pos.x >= width || p.v[0].pos.y >= height) return;
+		if (p.v[0].pos.x < 0 || p.v[0].pos.y < 0) return;
+		rasterizePoint(p.v[0], fragBuf, depth, mutex, width);
+	}
+	else if (p.primitiveType == Line) {
+		rasterizeLine(p.v[0], p.v[1], fragBuf, depth, mutex, width, height);
 	}
 }
 
