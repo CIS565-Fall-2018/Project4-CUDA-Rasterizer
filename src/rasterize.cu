@@ -1000,5 +1000,11 @@ void rasterizeFree() {
 	cudaFree(dev_depth);
 	dev_depth = NULL;
 
+	cudaFree(dev_tilePrimitives);
+	dev_tilePrimitives = NULL;
+
+	cudaFree(dev_primitiveIdxPerTile);
+	dev_primitiveIdxPerTile = NULL;
+
     checkCUDAError("rasterize Free");
 }
