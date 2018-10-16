@@ -829,7 +829,7 @@ __global__ void rasterizePrimitive (
 	//Back culling calculation
 	glm::vec3 _N = glm::cross(p1 - p0, p2 - p0);
 	float backface_check = glm::dot(p0 - dev_primitives[idx].v[0].eyePos, _N);
-	if (backface_check >= 0) {
+	if (backface_check > 0) {
 		return;
 	}
 #endif
