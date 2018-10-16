@@ -154,7 +154,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
     if (x < w && y < h) {
 		float diffuseFactor = fmaxf(0.0f, glm::dot(fragmentBuffer[index].eyeNor, fragmentBuffer[index].eyeLightDir));
-		framebuffer[index] = fragmentBuffer[index].color *diffuseFactor;
+		framebuffer[index] = fragmentBuffer[index].color * diffuseFactor;
 
 		// TODO: add your fragment shader code here
 		// compute diffuse color using Blinn or BlinnPhong
@@ -171,8 +171,8 @@ void rasterizeInit(int w, int h, int tilePixels) {
     width = w;
     height = h;
 	tilePixelSize = tilePixels;
-	tileWidth = (int)ceil(w / tilePixels);
-	tileHeight = (int)ceil(h / tilePixels);
+	tileWidth = (int)ceilf((float)w / tilePixels);
+	tileHeight = (int)ceilf((float)h / tilePixels);
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -743,11 +743,11 @@ void dividePrimToTiles(Primitive* primitives, int* tilePrimitives, unsigned int*
 
 		// add the primitive to all tiles overlapped by the AABB
 		int tileMinX = fmaxf(0.0f, floorf(box.min.x / tilePixelSize));
-		int tileMaxX = fminf(tileHeight - 1, ceilf(box.max.x / tilePixelSize));
+		int tileMaxX = fminf(tileHeight, ceilf(box.max.x / tilePixelSize));
 		int tileMinY = fmaxf(0.0f, floorf(box.min.y / tilePixelSize));
-		int tileMaxY = fminf(tileWidth - 1, floorf(box.max.y / tilePixelSize));
-		for (int i = tileMinX; i <= tileMaxX; i++) {
-			for (int j = tileMinY; j <= tileMinY; j++) {
+		int tileMaxY = fminf(tileWidth, ceilf(box.max.y / tilePixelSize));
+		for (int i = tileMinX; i < tileMaxX; i++) {
+			for (int j = tileMinY; j < tileMaxY; j++) {
 				int tileIdx = tileWidth * i + j;
 				// get the next index to read in primitivesIdxPerTile using atomicInc
 				unsigned int nextWriteIdx = atomicInc(&primitivesIdxPerTile[tileIdx], maxPrimitivesPerTile);
@@ -772,7 +772,7 @@ void rasterizePrimToFrag(Primitive* dev_primitives, Fragment* dev_fragmentBuffer
 		AABB box = getAABBForTriangle(vertices);
 
 		// loop over all pixels of p's screen-clamped AABB to see if it's in p
-		for (int j = fmaxf(0, (int)box.min.y); j < fminf(height, (int)box.max.y + 1); j++) {  // TODO: use ceil and floor here
+		for (int j = fmaxf(0, (int)box.min.y); j < fminf(height, (int)box.max.y + 1); j++) {  
 			for (int i = fmaxf(0, (int)box.min.x); i < fminf(width, (int)box.max.x + 1); i++) {
 				int fidx = j * width + i;
 				glm::vec2 fragmentPos = glm::vec2(i + 0.5, j + 0.5f);
@@ -806,23 +806,37 @@ void rasterizeByTile(Primitive* primitives, int* tilePrimitives, unsigned int* p
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
-	if (x < tileHeight && y < tileWidth)
-	{
-		int tileIdx = y + (x * tileWidth);
+	if (x < tileHeight && y < tileWidth){
+		int tileIdx = x + (y * tileWidth);
 		// if this tile has no primitives, just exit
 		int primitivesInThisTile = primitiveIdxPerTile[tileIdx];
 		if (primitivesInThisTile == 0) return;
 
-		int fragmentX = x * tilePixelSize;
-		int fragmentY = y * tilePixelSize;
-		int* depthBuffer = (int*)malloc(tilePixelSize * tilePixelSize * sizeof(int));
+		int tileOriginX = x * tilePixelSize;
+		int tileOriginY = y * tilePixelSize;
+		/*int* depthBuffer = (int*)malloc(tilePixelSize * tilePixelSize * sizeof(int));
 		for (int i = 0; i < tilePixelSize * tilePixelSize; i++) {
 			depthBuffer[i] = INT_MAX;
-		}
+		}*/
+
+		/*for (int i = 0; i < tilePixelSize; i++) {
+			for (int j = 0; j < tilePixelSize; j++) {
+				int real_i = fminf(height - 1, tileOriginX + i);
+				int real_j = fminf(width - 1, tileOriginY + j);
+				int fidx = real_i * width + real_j;
+				glm::vec2 fragmentPos = glm::vec2(real_i + 0.5, real_j + 0.5f);
+
+				Fragment& frag = fragmentBuffer[fidx];
+				frag.color = glm::vec3(1, 1, 1);
+				frag.eyePos = glm::vec3(1, 1, 1);
+				frag.eyeNor = glm::vec3(1, 1, 1);
+				frag.eyeLightDir = glm::vec3(1, 1, 1);
+			}
+		}*/
 
 		// loop over all primitives
-		for (auto i = 0u; i < primitivesInThisTile; i++) {
-			int pid = tilePrimitives[tileIdx * maxPrimitivesPerTile + i];
+		for (auto k = 0u; k < primitivesInThisTile; k++) {
+			int pid = tilePrimitives[tileIdx * maxPrimitivesPerTile + k];
 			const Primitive& p = primitives[pid];
 			glm::vec3 vertices[3];
 			vertices[0] = glm::vec3(p.v[0].pos);
@@ -831,27 +845,27 @@ void rasterizeByTile(Primitive* primitives, int* tilePrimitives, unsigned int* p
 			AABB box = getAABBForTriangle(vertices);
 
 			// loop over all pixels of the tile to check if it's in the triangle
-			for (int i = 0; i < tilePixelSize; i++) {
-				for (int j = 0; j < tilePixelSize; j++) {
-					int real_i = fminf(height - 1, fragmentX + i);
-					int real_j = fminf(width - 1, fragmentY + j);
-					int fidx = real_i * width + real_j;
-					glm::vec2 fragmentPos = glm::vec2(real_i + 0.5, real_j + 0.5f);
+			for (int j = 0; j < tilePixelSize; j++) {
+				for (int i = 0; i < tilePixelSize; i++) {
+					int fragment_j = fminf(height - 1, tileOriginX + j);
+					int fragment_i = fminf(width - 1, tileOriginY + i);
+					int fidx = fragment_j * width + fragment_i;
+					glm::vec2 fragmentPos = glm::vec2(fragment_i + 0.5, fragment_j + 0.5f);
 					glm::vec3 baryCoor = calculateBarycentricCoordinate(vertices, fragmentPos);
 
 					// if it is, store p's value into the pixel
 					if (isBarycentricCoordInBounds(baryCoor)) {
 						// check for depth
-						float depth = -getZAtCoordinate(baryCoor, vertices) / 10.0f; // let's say near clip is at 0 and far is at 10
-						int intDepth = depth * INT_MAX;
+						//float depth = -getZAtCoordinate(baryCoor, vertices) / 10.0f; // let's say near clip is at 0 and far is at 10
+						//int intDepth = depth * INT_MAX;
 
-						if (intDepth < depthBuffer[i * tilePixelSize + j]) {
+						//if (intDepth < depthBuffer[i * tilePixelSize + j]) {
 							Fragment& frag = fragmentBuffer[fidx];
 							frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
 							frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
 							frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
 							frag.eyeLightDir = glm::normalize(glm::vec3(0, 100, 100) - frag.eyePos);
-						}
+						//}
 					}
 				}
 			}
@@ -917,21 +931,24 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 		// divide primitives into tiles by their AABB
 		dividePrimToTiles << <numBlocksForPrimitives, numThreadsPerBlock >> > (dev_primitives, dev_tilePrimitives,
 			dev_primitiveIdxPerTile, totalNumPrimitives, maxPrimitivesPerTile, tileWidth, tileHeight, tilePixelSize);
+		checkCUDAError("Divide Primitives to Tiles error");
 
 		// Rasterize by tile
-		dim3 blockCountTiles2D((tileHeight - 1) / blockSize2d.x + 1,
-			(tileWidth - 1) / blockSize2d.y + 1);
+		dim3 blockCountTiles2D((tileWidth - 1) / blockSize2d.x + 1,
+			(tileHeight - 1) / blockSize2d.y + 1);
 		rasterizeByTile << <blockCountTiles2D, blockSize2d >> > (dev_primitives, dev_tilePrimitives, dev_primitiveIdxPerTile,
 			dev_fragmentBuffer, width, height, tileWidth, tileHeight, tilePixelSize, maxPrimitivesPerTile);
+		checkCUDAError("Rasterize by tile error");
 	}
 	else {
 		// reset the fragment and depth buffer
 		cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 		initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
+		checkCUDAError("initialize depth buffer");
 
 		// Rasterize
 		rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, dev_depth, totalNumPrimitives, width, height);
-
+		checkCUDAError("rasterize primitives to fragment buffer");
 	}
 
     // Copy depthbuffer colors into framebuffer

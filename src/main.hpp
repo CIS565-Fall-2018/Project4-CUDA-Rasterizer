@@ -47,11 +47,11 @@ GLFWwindow *window;
 //----------CUDA STUFF-----------
 //-------------------------------
 
-int width = 1000;
-int height = 1000;
+int width = 800;
+int height = 800;
 
 bool useTiles = true;
-int tilePixelSize = 16;
+int tilePixelSize = 64;
 
 //-------------------------------
 //-------------MAIN--------------
