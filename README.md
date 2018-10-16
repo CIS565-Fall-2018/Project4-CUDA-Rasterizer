@@ -54,7 +54,7 @@ This project implements a full rasterization pipeline with GLTF assets support:
 | ------------- | ----------- |
 | ![](imgs/no_aa.png) | ![](imgs/aa.png) |
 
-Supersampling is type of anti-aliasing in which we render the image at a higher resolution (say 4x), then for the final output we downsample. This means that if for each final pixel we supersampled 4 other pixels, then the final color of a pixel is the average of those 4. This diminishes issues with stair-step like lines that should be smooth instead. Performance-wise, adding SSAA x4 means that you will be doing x4 amounts of work since your buffer is that much bigger. Everything else stays the same in terms of code structure, it really is just working with bigger buffers.
+Supersampling is type of anti-aliasing in which we render the image at a higher resolution (say 4x), then we downsample the final output. This means that if for each final pixel we supersampled 4 other pixels, then the final color of the pixel is the average of those 4. This diminishes issues with stair-step like lines that should be smooth instead. Performance-wise, adding SSAA x4 means that you will be doing x4 amounts of work since your buffer is that much bigger. Everything else stays the same in terms of code structure, it really is just working with bigger buffers.
 
 ### Perspective Correct Color
 | Without Correct Interp | With Correct Interp | 
