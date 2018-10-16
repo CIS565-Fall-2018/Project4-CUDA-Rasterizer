@@ -71,7 +71,7 @@ corrected checkboard|not-corrected checkboard
 
 ![](https://github.com/LanLou123/Project4-CUDA-Rasterizer/raw/master/renders/colorinterp.gif)
 
-# Percormance analysis
+# Performance analysis
 
 ## break down of pipeline time consumption:
 
