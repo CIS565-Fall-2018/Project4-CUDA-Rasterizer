@@ -10,6 +10,10 @@ CUDA Rasterizer
 
 ## CUDA Rasterizer
 
+| Duck        | Cesium Milk Truck           |
+| ------------- |:-------------:|
+| ![](images/duckGIF.gif)      | ![](images/truckGIF.gif)   |
+
 ### Shading Methods
 | Lambert        | Blinn-Phong            |
 | ------------- |:-------------:|

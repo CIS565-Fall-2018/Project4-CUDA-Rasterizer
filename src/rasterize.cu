@@ -106,7 +106,7 @@ namespace {
 #define PERSPECTIVE_CORRECT 0
 #define RASTERIZE_POINT 0
 #define RASTERIZE_LINE 0
-#define COLOR_INTERPOLATION 1
+#define COLOR_INTERPOLATION 0
 #define TIMER 0
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
