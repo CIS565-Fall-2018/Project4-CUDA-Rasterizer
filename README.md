@@ -71,6 +71,10 @@ Linear interpolation of vertex attributes generally leads to wrong results (colo
 Both images above show texture importing onto a quad. The one on the left shows incorrect interpolation of texture coordinates for the same reason as described above. The middle one shows the correct version. The right version shows a tweaked sampling model called bilinear filtering, which smoothes out displayed textures when they are larger or smaller than stored in memory. Performance-wise, bilinear filtering requires 3 additional global memory reads, which slows down the overall texturing pipeline.
 
 ## Performance in the Pipeline
+<p align="center">
+  <img src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/analysis.png"/>
+</p>
+Performance varied from scene to scene. For scenes with a large number of triangles, rasterization took the most amount of time because of the large amount of checks done in that stage. Framebuffer copying is the same in all stages (since it is the same operation, independent of scene size). Fragment shading was also almost the same, with the exception of the flower scene that did lambert shading instead of texture mapping, and finally vertex assembly was fast in all cases due to low branching (and the fact that we do it per vertex)
 
 # Build Instructions
 1. Install [CMake](https://cmake.org/install/)
@@ -82,7 +86,7 @@ Both images above show texture importing onto a quad. The one on the left shows 
 7. Configure the build with Visual Studio 14 2015 Win64, then generate the solution
 8. Run the solution using Visual Studio 2015
 10. Build cis_565_rasterizer and set it as Startup Project
-9. Run cis_565_rasterizer with command line arguments: ../gltf/name_of_gltf_folder/name_of_gltf_file.gltf
+9. Run cis_565_rasterizer with command line arguments: ../gltfs/name_of_gltf_folder/name_of_gltf_file.gltf
 
 
 ### Credits
