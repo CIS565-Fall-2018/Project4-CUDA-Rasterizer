@@ -22,11 +22,12 @@
 
 #define MODE_TRIANGLE	0
 #define MODE_POINT		1
+#define MODE_LINE		2
 
 #define OPTION_ENABLE_LAMBERT			0
 #define OPTION_ENABLE_SSAA				0
 #define OPTION_SSAA_GRID_SIZE 			2
-#define OPTION_ENABLE_BACK_FACE_CULLING	1
+#define OPTION_ENABLE_BACK_FACE_CULLING	0
 #define OPTION_SELECT_MODE				MODE_TRIANGLE
 
 #define RANDOM_SEED					1337L
@@ -856,7 +857,6 @@ __global__ void rasterizePrimitive (
 	}
 #endif
 
-#if OPTION_SELECT_MODE == MODE_TRIANGLE
 	//Triangle, defined by three points, used to get AABB
 	glm::vec3 points[3];
 	points[0] = glm::vec3(dev_primitives[idx].v[0].pos);
@@ -871,6 +871,7 @@ __global__ void rasterizePrimitive (
 	int heightStart = max(0, (int) aabb.min.y);
 	int heightEnd = min(height, (int) aabb.max.y);
 
+#if OPTION_SELECT_MODE == MODE_TRIANGLE
 	// Process each visible pixel
 	for (int h = heightStart; h <= heightEnd; h++) {
 		for (int w = widthStart; w <= widthEnd; w++) {
@@ -913,6 +914,53 @@ __global__ void rasterizePrimitive (
 
 		//Set to static (white) color
 		dev_fragmentBuffer[pointIdx].color = glm::vec3(1, 1, 1);
+	}
+#elif OPTION_SELECT_MODE == MODE_LINE
+	for (int i = 0; i < 3; i++) {
+		int j = (i + 1) % 2;
+		//Use vecs not ints so we can calculate diffY
+		glm::vec4 origin = dev_primitives[idx].v[i].pos;
+		glm::vec4 dest = dev_primitives[idx].v[j].pos;
+		//Flip to ensure origin < dest
+		if (dest.x < origin.x) {
+			glm::vec4 tmp = origin;
+			origin = dest;
+			dest = tmp;
+		}
+
+		//Calculate travel distance
+		int diffX = dest.x - origin.x;
+		//Prevent divide by 0
+		if (diffX == 0) {
+			diffX = 1;
+		}
+		int diffY = dest.y - origin.y;
+
+		int last = origin.y;
+		for (int x = origin.x; x <= dest.x; x++) {
+			int y = diffY * (x - origin.x) / diffX + origin.y;
+
+			//Same flipping as before, this time sorted by y
+			int originY = y;
+			int destY = last;
+			if (destY < originY) {
+				int tmpy = originY;
+				originY = destY;
+				destY = tmpy;
+			}
+
+			for (int y2 = originY; y2 <= destY; y2++) {
+				// Prevent memory access exception, OOB
+				if (x > widthEnd || x < widthStart || y2 > heightEnd || y2 < heightStart) {
+					continue;
+				}
+
+				int pointIdx = y2 * width + x;
+				//Set to static (white) color
+				dev_fragmentBuffer[pointIdx].color = glm::vec3(1, 1, 1);
+			}
+			last = y;
+		}
 	}
 #else
 	printf("ERROR: Invalid mode selected\n");
