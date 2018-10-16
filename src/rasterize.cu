@@ -20,6 +20,8 @@
 
 #include <math.h>
 
+#define OPTION_ENABLE_LAMBERT		0
+
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -162,16 +164,25 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *frameBuffer) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
     if (x < w && y < h) {
-        framebuffer[index] = fragmentBuffer[index].color;
+        frameBuffer[index] = fragmentBuffer[index].color;
 
 		// TODO: add your fragment shader code here
-
+#if OPTION_ENABLE_LAMBERT
+        // Adapted from https://www.opengl.org/sdk/docs/tutorials/ClockworkCoders/lighting.php
+        glm::vec3 v = fragmentBuffer[index].eyePos;
+        glm::vec3 N = fragmentBuffer[index].eyeNor;
+        glm::vec3 lightSource(1, 1, 1);
+        glm::vec3 L = glm::normalize(lightSource - v);
+        float Idiff = glm::dot(L, N);
+        Idiff = glm::clamp(Idiff, 0.0f, 1.0f);
+        frameBuffer[index] = Idiff * fragmentBuffer[index].color;
+#endif
     }
 }
 
