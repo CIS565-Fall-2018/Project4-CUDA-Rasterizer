@@ -100,9 +100,45 @@ But, a way to speed things up is to keep a track of triangles not facing the use
 
 - Performance Analysis 
 
+Chart of each pipeline stage
+
 ![](performance.png)
 
-Chart of each pipeline stage
+Data in nano seconds
+
+```
+    Triangle
+Vertex Assembly and Shader  236885
+Primitive Assembly  80467
+Rasterizer  1826779
+Rasterizer with texture mapping 0
+Rasterizer with backface culling    1638904
+Fragment shader 1132289
+    
+    Duck
+Vertex Assembly and Shader  289846
+Primitive Assembly  160934
+Rasterizer  0
+Rasterizer with texture mapping 3824242
+Rasterizer with backface culling    3632737
+Fragment shader 1105604
+    
+    Cow
+Vertex Assembly and Shader  534122
+Primitive Assembly  163808
+Rasterizer  6801853
+Rasterizer with texture mapping 0
+Rasterizer with backface culling    6472184
+Fragment shader 1110119
+    
+    Flower
+Vertex Assembly and Shader  468434
+Primitive Assembly  149029
+Rasterizer  4718007
+Rasterizer with texture mapping 0
+Rasterizer with backface culling    4325114
+Fragment shader 1165544
+```
 
 ## Third party usage
 

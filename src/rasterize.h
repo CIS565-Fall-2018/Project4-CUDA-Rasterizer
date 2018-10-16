@@ -11,6 +11,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
+#include <chrono>
 
 namespace tinygltf {
 class Scene;
@@ -102,6 +103,7 @@ struct ObjectData {
 };
 
 extern std::vector<ObjectData> objects;
+extern std::chrono::time_point<std::chrono::high_resolution_clock> clock_now;
 
 void rasterizeInit(int width, int height);
 void rasterizeSetBuffers(const tinygltf::Scene &scene);

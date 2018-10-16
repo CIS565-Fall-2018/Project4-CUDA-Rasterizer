@@ -20,17 +20,16 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-
 #define LAMBERT_SHADING 1
 #define BLINN_PHONG_SHADING 1
-//#define BACKFACE_CULLING 1
+#define BACKFACE_CULLING 1
 #define BILINEAR_FILTERING 1
 
 //happens by default now since added check
 //#define COLOR_TRIANGLE_INTERPOLATION 1
+std::chrono::time_point<std::chrono::high_resolution_clock> clock_now;
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
-
 
 static int width = 0;
 static int height = 0;
@@ -292,7 +291,7 @@ void copy_object(int index)
 
 void rasterizeSetBuffers(const tinygltf::Scene& scene)
 {
-
+  
   totalNumPrimitives = 0;
   std::map<std::string, BufferByte*> bufferViewDevPointers;
   // 1. copy all `bufferViews` to device memory
@@ -904,16 +903,31 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
       {
         dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
         dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+#ifdef PRINT_CLOCK
+        clock_now = std::chrono::high_resolution_clock::now();
+#endif
         _vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(
           p->numVertices, *p, MVP, MV, MV_normal, width, height);
         checkCUDAError("Vertex Processing");
         cudaDeviceSynchronize();
+#ifdef PRINT_CLOCK
+        std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - clock_now).count() << std::endl;
+#endif
+
+#ifdef PRINT_CLOCK
+        clock_now = std::chrono::high_resolution_clock::now();
+#endif
         _primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
         (p->numIndices,
          curPrimitiveBeginId,
          dev_primitives,
          *p);
         checkCUDAError("Primitive Assembly");
+        cudaDeviceSynchronize();
+
+#ifdef PRINT_CLOCK
+        std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - clock_now).count() << std::endl;
+#endif
         curPrimitiveBeginId += p->numPrimitives;
       }
     }
@@ -946,11 +960,24 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
 #endif
 
   // TODO: rasterize
+#ifdef PRINT_CLOCK
+        clock_now = std::chrono::high_resolution_clock::now();
+#endif
   rasterize_triangles<<<num_triangles, blockSize1d>>>(remaining_primitives, width, height, dev_depth, dev_primitives, dev_fragmentBuffer);
-
+        cudaDeviceSynchronize();
+#ifdef PRINT_CLOCK
+        std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - clock_now).count() << std::endl;
+#endif
   // Copy depthbuffer colors into framebuffer
   glm::vec3 camera_pos_in_MV = glm::vec3(MV * glm::vec4(camera_pos, 1.0f));
+#ifdef PRINT_CLOCK
+        clock_now = std::chrono::high_resolution_clock::now();
+#endif
   render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, dev_lights, num_lights, camera_pos_in_MV);
+        cudaDeviceSynchronize();
+#ifdef PRINT_CLOCK
+        std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - clock_now).count() << std::endl;
+#endif
   checkCUDAError("fragment shader");
 
 }

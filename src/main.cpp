@@ -6,7 +6,8 @@
  * @copyright University of Pennsylvania
  */
 
-
+//print clock time
+//#define PRINT_CLOCK 1
 
 #include "main.hpp"
 
@@ -15,7 +16,7 @@
 #include <util/tiny_gltf_loader.h>
 #include <random>
 
-//#define CUDA_STRIKE 1
+#define CUDA_STRIKE 1
 const int object_copies = 10;
 
 //-------------------------------
@@ -241,7 +242,10 @@ void runCuda()
     cudaGLUnmapBufferObject(pbo);
 #endif
 
-    frame++;
+#ifdef PRINT_CLOCK
+     system("pause");
+#endif
+	frame++;
     fpstracker++;
 }
 
