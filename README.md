@@ -14,6 +14,8 @@ CUDA Rasterizer
 
 A rasterizer takes 3D objects (defined using vector graphics) and converts it into a 2D representation to be viewed on a computer monitor. Rasterization is the technology behind all major video games as it is much faster than path tracing. 
 
+![](img/box-demo.gif)
+
 This project implements a a rasterizer with the following features:
  - Vertex shading
  - Primitive assembly support
@@ -32,9 +34,10 @@ All features may be toggled by changing the defined constants at the start of `s
 
 #### Lambert shading
 
-Lambert shading has no noticable affect on performance. The image on the left is without shading, while the image on the right has Lambert shading enabled. 
+Lambert shading has no noticable affect on performance. The image on the left is without shading, while the image on the right has Lambert shading enabled. The left image has simple normal coloring while the image on the right uses Lambert shading. 
 
-TODO: IMAGES
+![](img/lambert-comparison.png)
+
 
 #### Anti-Aliasing via Supersampling
 
@@ -46,13 +49,13 @@ A list of nearby pixels is generated (the size of which depends on `OPTION_SSAA_
 
 SSAA has an significant, negative impact on performance. This is unsuprising, since a much larger image must be generated first, typically with four times as many pixels. However, images can look much more realistic. Humans are accustomed to seeing objects in a continuous space in real life, not broken down into discrete pixels. Anti-aliasing aids to more accurately represent a continuous space. 
 
-TODO: IMAGES
+![](img/ssaa-comparison.png)
 
 #### Alternate Drawing Modes
 
 In addition to the typical `triangle` mode, `line` and `point` modes are also available. If enabled, the original vector graphic is reduced to solely its vertices (point mode). Line mode takes this one step further, connecting each vertex without filling triangle. Triangle mode uses the normal value for coloring, while all other modes are statically defined to be white. Without the need to fill the image, significantly fewer pixels need to be processed. This results in both point and line modes achieving much higher FPS than the normal triangle mode.
 
-TODO: IMAGES
+![](img/points-cow.png) ![](img/lines-cow.png)
 
 TODO: GRAPHS
 
