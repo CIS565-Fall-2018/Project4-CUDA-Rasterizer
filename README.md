@@ -54,11 +54,23 @@ This project implements a full rasterization pipeline with GLTF assets support:
 | ------------- | ----------- |
 | ![](imgs/no_aa.png) | ![](imgs/aa.png) |
 
-Supersampling is type of anti-aliasing in which we render the image at a higher resolution (say 4x), then for the final output we downsample. This means that if for each final pixel we supersampled 4 other pixels, then the final color of a pixel is the average of those 4. This diminishes issues with stair-step like lines that should be smooth instead.
+Supersampling is type of anti-aliasing in which we render the image at a higher resolution (say 4x), then for the final output we downsample. This means that if for each final pixel we supersampled 4 other pixels, then the final color of a pixel is the average of those 4. This diminishes issues with stair-step like lines that should be smooth instead. Performance-wise, adding SSAA x4 means that you will be doing x4 amounts of work since your buffer is that much bigger. Everything else stays the same in terms of code structure, it really is just working with bigger buffers.
 
 ### Perspective Correct Color
+| Without Correct Interp | With Correct Interp | 
+| ------------- | ----------- |
+| ![](imgs/incorr_col.png) | ![](imgs/corr_col.png) |
+
+Linear interpolation of vertex attributes generally leads to wrong results (colors, normals, texture coordinates) because the geometry is distorted in the world and depth should be taken into account. Applying perspective correct interpolation does that (incorporates the z-value into the calculation) such that the values are interpolated correctly. Performance-wise, this has no impact at all since we are just doing 4 extra floating point computation for the interpolation (dividing by z-values).
 
 ### Texture Mapping with Bilinear Filtering
+| Without Correct Interp | With Correct Interp |  With Bilinear Filtering | 
+| ------------- | ----------- | ----------- |
+| ![](imgs/incorr_tex.png) | ![](imgs/corr_tex.png) | ![](imgs/bilinear.png) |
+
+Both images above show texture importing onto a quad. The one on the left shows incorrect interpolation of texture coordinates for the same reason as described above. The middle one shows the correct version. The right version shows a tweaked sampling model called bilinear filtering, which smoothes out displayed textures when they are larger or smaller than stored in memory. Performance-wise, bilinear filtering requires 3 additional global memory reads, which slows down the overall texturing pipeline.
+
+## Performance in the Pipeline
 
 # Build Instructions
 1. Install [CMake](https://cmake.org/install/)
