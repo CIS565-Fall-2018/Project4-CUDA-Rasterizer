@@ -15,6 +15,8 @@ CUDA Rasterizer
 | ------------- |:-------------:|
 | ![](images/lambert.png)      | ![](images/blinn.png)   |
 
+Use different shading methods to render the object.
+
 ### Perspective correct texture 
 
 | Non-perspective correct        | Perspective correct             |
@@ -31,10 +33,22 @@ CUDA Rasterizer
 | ------------- |:-------------:|
 | ![](images/triangle_color.png)      | ![](images/box_color.png)   |
 
+Assigned red, green and blue for vertices of each triangle then use barycentric interpolation to calculate the color of each pixel in that triangle.
+
 ### Rasterize point and line
 | Point cloud       | Wireframe            |
 | ------------- |:-------------:|
 | ![](images/point.gif)      | ![](images/line.gif)   |
+
+For rasterizing points, just assign each fragment with a color on that pixel and assign the color to that pixel on frame buffer.
+
+For rasterizing lines, loop all edges for each triangle and calculate the length for each line segment. Divide the line segment into tiny part then assigned color on that pixel. 
+
+### Perform Analysis
+
+![](images/time.png)
+
+Recorded the running time for each process. In general, vertex transform and primitive assembly took about similar amount of time for different test files. We can see that in truck example, the rasterization took most of the time since Cesium Milk Truck has several different texture. 
 
 ### Credits
 
