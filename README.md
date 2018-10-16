@@ -10,6 +10,7 @@ CUDA Rasterizer
 ![](cuda_strike.gif)
 
 - * Reference to the First Person shooter [Counter Strike](https://en.wikipedia.org/wiki/Counter-Strike)
+- * Not very accurate of a first person shooter, but the enemies are ducks and pressing the left button deletes them :)
 
 ## What is a rasterizer?
 
