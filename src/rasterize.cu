@@ -28,8 +28,12 @@ namespace {
 
 	typedef unsigned char BufferByte;
 
-#define MAX_INSTANCES 10
-#define NUM_INSTANCES 3
+#define NUM_INSTANCES 1
+
+#define AA_SUPER_SAMPLE
+#define AA_MULTI_SAMPLE
+
+#define SSAA_LEVEL 1
 
 	enum PrimitiveType
 	{
@@ -41,19 +45,11 @@ namespace {
 	struct VertexOut 
 	{
 		glm::vec4 pos;
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
 
-		// TODO: add new attributes to your VertexOut
-		// The attributes listed below might be useful, 
-		// but always feel free to modify on your own
-
-		 glm::vec3 eyePos;	// eye space position used for shading
-		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
-
-		// glm::vec3 col;
-		 glm::vec2 texcoord0;
-		 TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
-		// ...
+		glm::vec3 color;
+		glm::vec2 texcoord0;
 	};
 
 	struct Primitive 
@@ -61,6 +57,9 @@ namespace {
 		int instanceId;
 		PrimitiveType primitiveType = Triangle;	// C++ 11 init
 		VertexOut v[3];
+		TextureData* dev_diffuseTex;
+		int diffuseTexWidth;
+		int diffuseTexHeight;
 	};
 
 	struct Fragment 
@@ -68,9 +67,10 @@ namespace {
 		glm::vec3 color;
 		glm::vec3 eyePos;
 		glm::vec3 eyeNor;
-		// VertexAttributeTexcoord texcoord0;
-		// TextureData* dev_diffuseTex;
-		// ...
+		VertexAttributeTexcoord texcoord0;
+		TextureData* dev_diffuseTex;
+		int diffuseTexWidth;
+		int diffuseTexHeight;
 	};
 
 	struct PrimitiveDevBufPointers 
@@ -110,6 +110,8 @@ namespace {
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
+static int downScaledWidth = 0;
+static int downScaledHeight = 0;
 
 static int width = 0;
 static int height = 0;
@@ -118,6 +120,7 @@ static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
+static glm::vec3 *dev_AAFrameBuffer = NULL;
 
 static float * dev_depth = NULL;	// you might need this buffer when doing depth test
 static unsigned int* dev_mutex = NULL;
@@ -149,9 +152,14 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 /**
  * Called once at the beginning of the program to allocate memory.
  */
-void rasterizeInit(int w, int h) {
-    width = w;
-    height = h;
+void rasterizeInit(int w, int h) 
+{
+	downScaledWidth = w;
+	downScaledHeight = h;
+
+    width = w * SSAA_LEVEL;
+    height = h * SSAA_LEVEL;
+
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -159,6 +167,10 @@ void rasterizeInit(int w, int h) {
     cudaFree(dev_framebuffer);
     cudaMalloc(&dev_framebuffer,   width * height * sizeof(glm::vec3));
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
+
+	cudaFree(dev_AAFrameBuffer);
+	cudaMalloc(&dev_AAFrameBuffer,   downScaledWidth * downScaledHeight * sizeof(glm::vec3));
+	cudaMemset(dev_AAFrameBuffer, 0, downScaledWidth * downScaledHeight * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(float));
@@ -638,6 +650,7 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 		// Attributes
 		const glm::vec3 inPos = primitive.dev_position[vid];
 		const glm::vec3 inNormal = primitive.dev_normal[vid];
+		
 
 		// This is in NDC Space
 		glm::vec4 outPos = MVP * glm::vec4(inPos, 1.f);
@@ -652,8 +665,14 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 		{
 			// Output of vertex shader
 			primitive.dev_verticesOut[vid * numInstances + instanceId].pos = screenPos + instanceOffset * float(instanceId);
-			primitive.dev_verticesOut[vid * numInstances + instanceId].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));;
+			primitive.dev_verticesOut[vid * numInstances + instanceId].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));
 			primitive.dev_verticesOut[vid * numInstances + instanceId].eyeNor = MV_normal * inNormal;
+
+			if (primitive.dev_diffuseTex != NULL)
+			{
+				primitive.dev_verticesOut[vid * numInstances + instanceId].texcoord0 = primitive.dev_texcoord0[vid];
+			}
+			
 		}
 	}
 }
@@ -674,11 +693,25 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 			int pid = iid / (int)primitive.primitiveType;;	// id for cur primitives vector
 			if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) 
 			{
-				const int indexPos = primitive.dev_indices[iid] * numInstances + instanceId;
+				const int devBufferIndexPos = primitive.dev_indices[iid] * numInstances + instanceId;
+				const int primitiveIndexPos = (pid + curPrimitiveBeginId) * numInstances + instanceId;
 				
-				dev_primitives[(pid + curPrimitiveBeginId) * numInstances + instanceId].v[iid % (int)primitive.primitiveType] = primitive.dev_verticesOut[indexPos];
-				dev_primitives[(pid + curPrimitiveBeginId) * numInstances + instanceId].primitiveType = primitive.primitiveType;
-				dev_primitives[(pid + curPrimitiveBeginId) * numInstances + instanceId].instanceId = instanceId;
+				dev_primitives[primitiveIndexPos].v[iid % (int)primitive.primitiveType] = primitive.dev_verticesOut[devBufferIndexPos];
+				dev_primitives[primitiveIndexPos].primitiveType = primitive.primitiveType;
+				dev_primitives[primitiveIndexPos].instanceId = instanceId;
+
+				if (primitive.dev_diffuseTex != NULL)
+				{
+					dev_primitives[primitiveIndexPos].dev_diffuseTex = primitive.dev_diffuseTex;
+					dev_primitives[primitiveIndexPos].diffuseTexWidth = primitive.diffuseTexWidth;
+					dev_primitives[primitiveIndexPos].diffuseTexHeight = primitive.diffuseTexHeight;
+				}
+				else
+				{
+					dev_primitives[primitiveIndexPos].dev_diffuseTex = NULL;
+					dev_primitives[primitiveIndexPos].diffuseTexWidth = 0;
+					dev_primitives[primitiveIndexPos].diffuseTexHeight = 0;
+				}
 			}
 
 		}
@@ -708,6 +741,10 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 			triangle[1] = glm::vec3(v2.pos);
 			triangle[2] = glm::vec3(v3.pos);
 
+			TextureData* dev_diffuseTex = primitive.dev_diffuseTex;
+			int textureWidth = primitive.diffuseTexWidth;
+			int textureHeight = primitive.diffuseTexHeight;
+
 			const AABB bounds = getAABBForTriangle(triangle);
 
 			// Clamp TO Screen
@@ -736,20 +773,39 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 
 						bool isSet;
 						do {
-							isSet = (atomicCAS(mutexLock, 0, 1) == 0);
+							isSet = (atomicCAS(&mutexLock[pixelIndex], 0, 1) == 0);
 							if (isSet) 
 							{
 								if (currDepth < dev_depth[pixelIndex])
 								{
 									dev_fragmentBuffer[pixelIndex].eyeNor = (baryCoord.x * v1.eyeNor) + (baryCoord.y * v2.eyeNor) + (baryCoord.z * v3.eyeNor);
 									dev_fragmentBuffer[pixelIndex].eyePos = (baryCoord.x * v1.eyePos) + (baryCoord.y * v2.eyePos) + (baryCoord.z * v3.eyePos);
-									dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.f, 0.f, 0.f);
+									
+									if (dev_diffuseTex != NULL)
+									{
+										glm::vec2 textureCoord = (baryCoord.x * v1.texcoord0) + (baryCoord.y * v2.texcoord0) + (baryCoord.z * v3.texcoord0);
+										textureCoord = glm::vec2(textureCoord.x * textureWidth, textureCoord.y * textureHeight);
+
+										textureCoord = glm::clamp(textureCoord, glm::vec2(0.f), glm::vec2(textureWidth - 1, textureHeight - 1));
+
+										// Apparently there are 3 bytes per pixel based on the texture array size and texture size.
+										const int startPixelIndex = int(textureCoord.x + textureCoord.y * textureWidth) * 3;
+										float r = dev_diffuseTex[startPixelIndex];
+										float g = dev_diffuseTex[startPixelIndex + 1];
+										float b = dev_diffuseTex[startPixelIndex + 2];
+										dev_fragmentBuffer[pixelIndex].color = glm::vec3(r, g, b) / 255.f;
+									}
+									else
+									{
+										dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.0f);// (baryCoord.x * v1.color) + (baryCoord.y * v2.color) + (baryCoord.z * v3.color);
+									}
+									
 									dev_depth[pixelIndex] = currDepth;
 								}
 							}
 							if (isSet) 
 							{
-								*mutexLock = 0;
+								mutexLock[pixelIndex] = 0;
 							}
 						} while (!isSet);
 
@@ -760,6 +816,7 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 	}
 }
 
+//#define MAT_PLAIN
 #define MAT_LAMBERT
 //#define MAT_BLINN_PHONG
 
@@ -778,6 +835,12 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer)
 
 	if (x < w && y < h) 
 	{
+
+		// No Shading
+#ifdef MAT_PLAIN
+		framebuffer[index] = fragmentBuffer[index].color;
+#endif
+
 		// Lamberts Material
 #ifdef MAT_LAMBERT
 
@@ -800,14 +863,59 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer)
 
 	}
 }
+
+#define SSAA_UNIFORM_GRID
+
+/** 
+* Performs Anti-Aliasing
+*/
+__global__
+void _SSAA(int downWidth, int downHeight, int originalWidth, int originalHeight, glm::vec3 *inputFrameBuffer, glm::vec3 *aaFrameBuffer) 
+{
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	int index = x + (y * downWidth);
+
+	if (x < downWidth && y < downHeight) 
+	{
+#ifdef SSAA_UNIFORM_GRID
+
+		const int upscaledIndexX = x * SSAA_LEVEL;
+		const int upscaledIndexY = y * SSAA_LEVEL;
+
+		glm::vec3 averageColor(0.f);
+		int numColors = 0;
+
+		for (int i = 0; i < SSAA_LEVEL; ++i)
+		{
+			for (int j = 0; j < SSAA_LEVEL; ++j)
+			{
+				const int newIndex = (upscaledIndexX + i) + ((upscaledIndexY + i) * originalWidth);
+				averageColor += inputFrameBuffer[newIndex];
+				numColors++;
+			}
+		}
+		aaFrameBuffer[index] = (averageColor / float(numColors));
+
+#endif // SSAA_UNIFORM_GRID
+
+	}
+}
+
+
 /**
  * Perform rasterization.
  */
 void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3& MV_normal, const glm::mat3& M_inverseTranspose, const glm::vec3& eyePos) {
-    int sideLength2d = 8;
+    
+	int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
+
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
 		(height - 1) / blockSize2d.y + 1);
+
+	dim3 blockAACount2d((downScaledWidth  - 1) / blockSize2d.x + 1,
+		(downScaledHeight - 1) / blockSize2d.y + 1);
 
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
@@ -864,8 +972,12 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
 
+	// perform SSAA
+	_SSAA <<< blockAACount2d, blockSize2d >>> (downScaledWidth, downScaledHeight, width, height, dev_framebuffer, dev_AAFrameBuffer);
+	checkCUDAError("SSAA");
+
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+    sendImageToPBO<<<blockAACount2d, blockSize2d>>>(pbo, downScaledWidth, downScaledHeight, dev_AAFrameBuffer);
     checkCUDAError("copy render result to pbo");
 }
 
@@ -903,6 +1015,9 @@ void rasterizeFree() {
 
     cudaFree(dev_framebuffer);
     dev_framebuffer = NULL;
+
+	cudaFree(dev_AAFrameBuffer);
+	dev_AAFrameBuffer = NULL;
 
 	cudaFree(dev_depth);
 	dev_depth = NULL;

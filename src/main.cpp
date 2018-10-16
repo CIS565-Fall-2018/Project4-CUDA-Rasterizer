@@ -14,6 +14,7 @@
 #define TINYGLTF_LOADER_IMPLEMENTATION
 #include <util/tiny_gltf_loader.h>
 
+
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
@@ -45,7 +46,9 @@ int main(int argc, char **argv) {
 	}
 
 	if (!ret) {
+
 		printf("Failed to parse glTF\n");
+		getchar();
 		return -1;
 	}
 
@@ -59,6 +62,8 @@ int main(int argc, char **argv) {
         // GLFW main loop
         mainLoop();
     }
+
+	
 
     return 0;
 }
