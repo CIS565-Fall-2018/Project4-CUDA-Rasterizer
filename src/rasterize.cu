@@ -22,13 +22,13 @@
 #define normaltest 0
 #define textureenabled 1
 
-#define lambert 0
-#define blinnphong 0
-#define perspectivecorrection 1
-#define bilinearfiltering 1
+#define lambert 1
+#define blinnphong 1
+#define perspectivecorrection 0
+#define bilinearfiltering 0
 #define primitiveline 0
 #define primitivepoints 0
-#define backfaceculling 0
+#define backfaceculling 1
 #define timeanalysis 0
 
 PerformanceTimer& timer()
