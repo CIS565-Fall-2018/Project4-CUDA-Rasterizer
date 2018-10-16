@@ -14,22 +14,35 @@ CUDA Rasterizer
 
 In this project, I implemented a Path Tracer using the CUDA parallel computing platform. Path Tracing is a computer graphics Monte Carlo method of rendering images of three-dimensional scenes such that the global illumination is faithful to reality. 
 
-# Path Tracing Intro
+# Rasterizer Intro
 <p align="center">
-  <img width="300" height="400" src="https://github.com/ziedbha/Project3-CUDA-Path-Tracer/blob/master/images/explanation.png"/>
+  <img width="470" height="300" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/raster.jpg"/>
 </p>
-In simple terms, a path tracer fires rays from each pixel, which would bounce off in many directions depending on the objects in the scene. If the ray is fortunate enough, it would hit an illuminating surface (lightbulb, sun, etc...), and would cause the first object it hit to be illuminated, much like how light travels towards our eyes.
+Rasterization is a fast rendering technique used in computer graphics. In simple terms, after loading in a model in memory, we identify triangles that constitute the geometry, and then test the intersection of screen pixels with these triangles. In the end, we render the closest intersected pixels. The image above showcases which pixels are considered intersected with the loaded triangle.
 
-## Issues
-Path tracing is computationally expensive since for each pixel, our rays might hit numerous geometries along the way. Checking intersections with each geometry is expensive, which is why we employ optimization techniques (culling, caching, stream compaction, material sorting) as well as use a parallel computing platform (CUDA) to take advantage of the GPUs cores.
+This project implements a full rasterization pipeline with GLTF assets support:
+1. Load in GLTF asset into memory
+2. Transform the vertices from model space to pixel space using camera projection
+3. Assemble transformed vertices into packages (normals, colors, textures, etc..) with triangulation
+4. Perform triangle/pixel intersection (rasterization)
+5. Color identified fragments
+6. Send the buffer of colored fragments to the display
 
-## Stream Compaction, Caching, & Sorting Optimizations
-### Stream Compaction
-[Stream Compaction](https://github.com/ziedbha/Project2-Stream-Compaction) helps by ommitting rays that aren't used in an iteration anymore. This happens when a ray hits nothing, or runs out of bounces (e.g hits a light source). This allows for a fewer blocks to launch, and less divergence in threads. The effects are great in different types of open scenes (tall, numerous materials, high-poly count) as shown below:
-![](images/stream_compaction_scenes.png)
+## Scenes
+### Flower
+| Depth View | Normals View | Colored View - Lambert |
+| ------------- | ----------- | ----------- |
+| <p align="center"><img width="250" height="250" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/flower_z.png"/></p>| <p align="center"><img width="250" height="250" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/flower_norm.png/"></p> | <p align="center"><img width="250" height="250" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/flower_col.png/"></p> |
 
-However, the effects are less impressive when it comes to closed scenes, since stream compaction only comes in when rays hit a light source or natrually run out of permitted bounces. Overall, performance improves a lot with stream compaction.
-![](images/open_vs_closed_compact.png)
+### Duck
+| Depth View | Normals View | Textured View |
+| ------------- | ----------- | ----------- |
+| <p align="center"><img width="250" height="250" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/duck_z.png"/></p>| <p align="center"><img width="250" height="250" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/duck_norm.png/"></p> | <p align="center"><img width="250" height="250" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/duck_col.png/"></p> |
+
+### CesiumTruck
+| Depth View | Normals View | Textured View |
+| ------------- | ----------- | ----------- |
+| <p align="center"><img width="300" height="200" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/truck_z.png"/></p>| <p align="center"><img width="300" height="200" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/truck_norm.png/"></p> | <p align="center"><img width="300" height="200" src="https://github.com/ziedbha/Project4-CUDA-Rasterizer/blob/master/imgs/truck_col.png/"></p> |
 
 ### Caching
 Since in the beginning of every iteration we fire the exact same ray from the exact same pixel, then we cache the intersection results so that we do not repeat them in subsequent iterations. Note that this feature does not work when anti-aliasing is enabled since anti-aliasing adds noise to the first rays, making them probabilistically unequal in subsequent iterations.
@@ -38,7 +51,7 @@ Since in the beginning of every iteration we fire the exact same ray from the ex
 
 | Without Sorting | With Sorting | 
 | ------------- | ----------- |
-| <p align="center"><img width="300" height="350" src="https://github.com/ziedbha/Project3-CUDA-Path-Tracer/blob/master/images/no_sort.png"/></p>| <p align="center"><img width="300" height="350" src="https://github.com/ziedbha/Project3-CUDA-Path-Tracer/blob/master/images/with_sort.png"/></p> |
+| <p align="center"><img width="200" height="250" src="https://github.com/ziedbha/Project3-CUDA-Path-Tracer/blob/master/images/no_sort.png"/></p>| <p align="center"><img width="300" height="350" src="https://github.com/ziedbha/Project3-CUDA-Path-Tracer/blob/master/images/with_sort.png"/></p> |
 
 Before shading a ray, I performed an optimization that consisted in sorting the rays by the material type they hit. This allowed the CUDA warps (sets of threads) to diverge less in execution, saving more time. As the graphs above show, there are more branches in the unsorted case, and even more divergence as captured by the CUDA profiler.
 
