@@ -50,6 +50,7 @@ GLFWwindow *window;
 int width = 1000;
 int height = 1000;
 
+bool useTiles = true;
 int tilePixelSize = 16;
 
 //-------------------------------

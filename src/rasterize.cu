@@ -864,7 +864,7 @@ void rasterizeByTile(Primitive* primitives, int* tilePrimitives, unsigned int* p
 /**
  * Perform rasterization.
  */
-void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) {
+void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal, bool useTiles) {
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -908,27 +908,31 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	dim3 numThreadsPerBlock(128);
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
-	// reset the tilePrimitive buffer
-	cudaMemset(dev_tilePrimitives, -1, tileWidth * tileHeight * maxPrimitivesPerTile * sizeof(int));
-	cudaMemset(dev_primitiveIdxPerTile, 0, tileWidth * tileHeight * sizeof(unsigned int));
-	// divide primitives into tiles by their AABB
-	dividePrimToTiles <<<numBlocksForPrimitives, numThreadsPerBlock>>> (dev_primitives, dev_tilePrimitives, 
-		dev_primitiveIdxPerTile, totalNumPrimitives, maxPrimitivesPerTile, tileWidth, tileHeight, tilePixelSize);
-
-	// reset the depth buffer
-	/*cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
-	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);*/
-	
-	// Rasterize by tile
-	dim3 blockCountTiles2D((tileHeight - 1) / blockSize2d.x + 1,
-		(tileWidth - 1) / blockSize2d.y + 1);
-	rasterizeByTile << <blockCountTiles2D, blockSize2d >> > (dev_primitives, dev_tilePrimitives, dev_primitiveIdxPerTile,
-		dev_fragmentBuffer, width, height, tileWidth, tileHeight, tilePixelSize, maxPrimitivesPerTile);
-
-	
 	// Rasterize
-	//rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, dev_depth, totalNumPrimitives, width, height);
+	if (useTiles) {
+		// reset the tilePrimitive and fragment buffers
+		cudaMemset(dev_tilePrimitives, -1, tileWidth * tileHeight * maxPrimitivesPerTile * sizeof(int));
+		cudaMemset(dev_primitiveIdxPerTile, 0, tileWidth * tileHeight * sizeof(unsigned int));
+		cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
+		// divide primitives into tiles by their AABB
+		dividePrimToTiles << <numBlocksForPrimitives, numThreadsPerBlock >> > (dev_primitives, dev_tilePrimitives,
+			dev_primitiveIdxPerTile, totalNumPrimitives, maxPrimitivesPerTile, tileWidth, tileHeight, tilePixelSize);
 
+		// Rasterize by tile
+		dim3 blockCountTiles2D((tileHeight - 1) / blockSize2d.x + 1,
+			(tileWidth - 1) / blockSize2d.y + 1);
+		rasterizeByTile << <blockCountTiles2D, blockSize2d >> > (dev_primitives, dev_tilePrimitives, dev_primitiveIdxPerTile,
+			dev_fragmentBuffer, width, height, tileWidth, tileHeight, tilePixelSize, maxPrimitivesPerTile);
+	}
+	else {
+		// reset the fragment and depth buffer
+		cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
+		initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
+
+		// Rasterize
+		rasterizePrimToFrag <<<numBlocksForPrimitives, numThreadsPerBlock>>>(dev_primitives, dev_fragmentBuffer, dev_depth, totalNumPrimitives, width, height);
+
+	}
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
