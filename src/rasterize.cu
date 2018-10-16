@@ -102,19 +102,20 @@ namespace {
 }
 
 // Are we supersampling the input and downsampling the output to get AA effect?
-#define SSAA 0
+#define SSAA 1
 #define SSAA_FACTOR 2
 
 // Are we using UV tex mapping w/ bilinear filtering?
-#define TEXTURE 0
-#define TEXTURE_BILINEAR 0
+// NOTE: If your gltf does not have textures, disable this!!!!!!
+#define TEXTURE 1
+#define TEXTURE_BILINEAR 1
 
 // Are we using perspective correct depth to interpolate?
-#define CORRECT_INTERP 0
+#define CORRECT_INTERP 1
 
 // Debug views for depth & normals
 #define DEBUG_Z 0
-#define DEBUG_NORM 1
+#define DEBUG_NORM 0
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
