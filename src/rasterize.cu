@@ -22,13 +22,13 @@
 #define normaltest 0
 #define textureenabled 1
 
-#define lambert 1
-#define blinnphong 1
+#define lambert 0
+#define blinnphong 0
 #define perspectivecorrection 0
 #define bilinearfiltering 0
 #define primitiveline 0
 #define primitivepoints 0
-#define backfaceculling 1
+#define backfaceculling 0
 #define timeanalysis 0
 
 PerformanceTimer& timer()
@@ -364,6 +364,13 @@ void _rasterize(int numPrimitives, int w, int h, Primitive* primitives, Fragment
 		glm::vec3(p.v[1].pos),
 		glm::vec3(p.v[2].pos)
 	};
+
+#if backfaceculling
+	if (isBackface(tri)) {
+		return;
+	}
+#endif
+
 	glm::vec3 col[3] = {
 		glm::vec3(1, 0, 0),
 		glm::vec3(0, 1, 0),
@@ -374,12 +381,6 @@ void _rasterize(int numPrimitives, int w, int h, Primitive* primitives, Fragment
 		p.v[1].eyePos,
 		p.v[2].eyePos
 	};
-
-#if backfaceculling
-	if (isBackface(tri)) {
-		return;
-	}
-#endif
 
 #if primitivepoints
 	
@@ -429,7 +430,7 @@ void _rasterize(int numPrimitives, int w, int h, Primitive* primitives, Fragment
 #else
 					fragments[index].pos = barycentricInterpolation(baryCoord, tri);
 					fragments[index].pos.z = 1.0f - fragments[index].pos.z;
-					fragments[index].color = glm::vec3(1.0f); //barycentricInterpolation(baryCoord, col);
+					fragments[index].color = barycentricInterpolation(baryCoord, col);
 					fragments[index].texcoord0 = barycentricInterpolation(baryCoord, p.v[0].texcoord0, p.v[1].texcoord0, p.v[2].texcoord0);
 #endif
 				}
@@ -995,7 +996,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 #if timeranalysis
 	timer().startGpuTimer();
 #endif
-
+	//std::cout << totalNumPrimitives << std::endl;
 	// TODO: rasterize
 	dim3 numThreadsPerBlock(blocksize < totalNumPrimitives ? blocksize : totalNumPrimitives);
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
