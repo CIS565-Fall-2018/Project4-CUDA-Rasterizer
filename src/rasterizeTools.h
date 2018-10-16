@@ -60,6 +60,18 @@ BoundingBox getBoundingBoxForTriangle(const glm::vec2 p0, const glm::vec2 p1, co
   return aabb;
 }
 
+__host__ __device__ static
+BoundingBox getBoundingBoxForLine(const glm::vec2 p0, const glm::vec2 p1) {
+  BoundingBox aabb;
+  aabb.min = glm::vec2(
+    glm::min(p0.x, p1.x),
+    glm::min(p0.y, p1.y));
+  aabb.max = glm::vec2(
+    glm::max(p0.x, p1.x),
+    glm::max(p0.y, p1.y));
+  return aabb;
+}
+
 // CHECKITOUT
 /**
  * Calculate the signed area of a given triangle.

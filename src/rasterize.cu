@@ -45,7 +45,7 @@ namespace
 
     glm::vec3 eyePos; // eye space position used for shading
     glm::vec3 eyeNor; // eye space normal used for shading, cuz normal will go wrong after perspective transformation
-    // glm::vec3 col;
+    glm::vec3 col;
     glm::vec2 texcoord0;
     TextureData* dev_diffuseTex = NULL;
     int diffuseTexWidth;
@@ -108,9 +108,16 @@ namespace
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
+static PrimitiveType GLOBAL_DRAW_MODE = PrimitiveType::Triangle;
 
 static int width = 0;
 static int height = 0;
+
+static int baseWidth = 0;
+static int baseHeight = 0;
+
+static const int ALIASING_VALUE = 2;
+static const glm::mat3 ALIASING_SCALE = glm::mat3(glm::scale(glm::mat4(), glm::vec3(ALIASING_VALUE)));
 
 static int totalNumPrimitives = 0;
 static Primitive* dev_primitives = NULL;
@@ -124,18 +131,40 @@ static int* dev_depth = NULL; // you might need this buffer when doing depth tes
  */
 __global__
 
-void sendImageToPBO(uchar4* pbo, int w, int h, glm::vec3* image)
+void sendImageToPBO(uchar4* pbo, int baseW, int baseH, int alias, glm::vec3* image)
 {
-  int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-  int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-  int index = x + (y * w);
+  const int row = (blockIdx.x * blockDim.x) + threadIdx.x;
+  const int col = (blockIdx.y * blockDim.y) + threadIdx.y;
+  const int index = row + (col * baseW);
 
-  if (x < w && y < h)
+  if (row < baseW && col < baseH)
   {
-    glm::vec3 color;
-    color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-    color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-    color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+    const int startX = (row * alias);
+    const int startY = (col * alias);
+
+    const int totalPartSize = alias * alias;
+
+    const int screenWidth = baseW * alias;
+    const int screenHeight = baseH * alias;
+
+    glm::vec3 color = glm::vec3();
+
+    for (int p = 0; p < alias; p++) {
+      int x = startX + p;
+
+      for (int q = 0; q < alias; q++) {
+        int y = startY + q;
+        int idx = x + (screenWidth * y);
+        color += image[idx];
+      }
+    }
+
+    color = color / (float)totalPartSize;
+
+    color.x = glm::clamp(color.x, 0.0f, 1.0f) * 255.0;
+    color.y = glm::clamp(color.y, 0.0f, 1.0f) * 255.0;
+    color.z = glm::clamp(color.z, 0.0f, 1.0f) * 255.0;
+
     // Each thread writes one pixel location in the texture (textel)
     pbo[index].w = 0;
     pbo[index].x = color.x;
@@ -162,7 +191,8 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer)
     float ambientTerm = 0.2f;
 
     glm::vec3 fragColor = frag.color;
-    if (frag.dev_diffuseTex) {
+    if (frag.dev_diffuseTex)
+    {
       const int pixelX = glm::floor(frag.uv.x * frag.diffuseTexWidth);
       const int pixelY = glm::floor(frag.uv.y * frag.diffuseTexHeight);
       const int linearCoordinate = pixelX + (frag.diffuseTexWidth * pixelY);
@@ -183,8 +213,6 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer)
     framebuffer[index] = (ambientTerm + diffuseTerm) * fragColor;
 
     // TODO: add your fragment shader code here
-
-
   }
 }
 
@@ -193,8 +221,12 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer)
  */
 void rasterizeInit(int w, int h)
 {
-  width = w;
-  height = h;
+  width = w * ALIASING_VALUE;
+  height = h * ALIASING_VALUE;
+
+  baseWidth = w;
+  baseHeight = h;
+
   cudaFree(dev_fragmentBuffer);
   cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
   cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -500,6 +532,7 @@ void rasterizeSetBuffers(const tinygltf::Scene& scene)
             break;
           };
 
+          // GLOBAL_DRAW_MODE = primitiveType;
 
           // ----------Attributes-------------
 
@@ -703,16 +736,21 @@ void _vertexTransformAndAssembly(
     // Finally transform x and y to viewport space
 
     const glm::vec3 devicePosition = primitive.dev_position[vid];
-    glm::vec4 screenPosition = MVP * glm::vec4(devicePosition, 1.0f);     // CLIP SPACE
-    screenPosition /= screenPosition.w;                                   // NDC SPACE
-    screenPosition.x = 0.5f * width * (1.0f + screenPosition.x);          // VIEWPORT SPACE
+    glm::vec4 screenPosition = MVP * glm::vec4(devicePosition, 1.0f); // CLIP SPACE
+    screenPosition /= screenPosition.w; // NDC SPACE
+    screenPosition.x = 0.5f * width * (1.0f + screenPosition.x); // VIEWPORT SPACE
     screenPosition.y = 0.5f * height * (1.0f - screenPosition.y);
 
     primitive.dev_verticesOut[vid].pos = screenPosition;
+    primitive.dev_verticesOut[vid].col = glm::vec3(1, 0, 0); // TODO: red
     primitive.dev_verticesOut[vid].eyePos = glm::vec3(MV * glm::vec4(devicePosition, 1.0f));
     primitive.dev_verticesOut[vid].eyeNor = MV_normal * primitive.dev_normal[vid];
     primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
-    primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
+    if (primitive.dev_texcoord0)
+    {
+      primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
+    }
+
     primitive.dev_verticesOut[vid].diffuseTexWidth = primitive.diffuseTexWidth;
     primitive.dev_verticesOut[vid].diffuseTexHeight = primitive.diffuseTexHeight;
 
@@ -725,7 +763,7 @@ void _vertexTransformAndAssembly(
 static int curPrimitiveBeginId = 0;
 
 __global__ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_primitives,
-                        PrimitiveDevBufPointers primitive)
+                                   PrimitiveDevBufPointers primitive, PrimitiveType drawMode)
 {
   // index id
   int iid = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -735,41 +773,50 @@ __global__ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Prim
     // TODO: uncomment the following code for a start
     // This is primitive assembly for triangles
 
-    int pid;	// id for cur primitives vector
-    if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-    	pid = iid / (int)primitive.primitiveType;
-    	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-    		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-    }
+    int pid; // id for cur primitives vector
+    // if (drawMode == TINYGLTF_MODE_TRIANGLES)
+    // {
+      pid = iid / (int)primitive.primitiveType;
+      dev_primitives[pid + curPrimitiveBeginId].primitiveType = drawMode;
+      dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType] = primitive.dev_verticesOut[primitive.dev_indices[iid]];
+    // }
 
 
     // TODO: other primitive types (point, line)
   }
 }
 
-__device__ void ClampRange(float& actualStart, float& actualEnd, float targetStart, float targetEnd) {
-  if (actualStart < targetStart) {
+__device__ void ClampRange(float& actualStart, float& actualEnd, float targetStart, float targetEnd)
+{
+  if (actualStart < targetStart)
+  {
     actualStart = targetStart;
   }
 
-  if (actualEnd > targetEnd) {
+  if (actualEnd > targetEnd)
+  {
     actualEnd = targetEnd;
   }
 }
 
-__device__ void ClampRangeInt(int& actualStart, int& actualEnd, int targetStart, int targetEnd) {
-  if (actualStart < targetStart) {
+__device__ void ClampRangeInt(int& actualStart, int& actualEnd, int targetStart, int targetEnd)
+{
+  if (actualStart < targetStart)
+  {
     actualStart = targetStart;
   }
 
-  if (actualEnd > targetEnd) {
+  if (actualEnd > targetEnd)
+  {
     actualEnd = targetEnd;
   }
 }
 
-__device__ bool CheckLineSegmentIntersect(glm::vec2 startPoint, glm::vec2 endPoint, int c, float slope, float* xCoord) {
+__device__ bool CheckLineSegmentIntersect(glm::vec2 startPoint, glm::vec2 endPoint, int c, float slope, float* xCoord)
+{
   /*----------  Slope 0 Check  ----------*/
-  if (slope > -EPSILON && slope < EPSILON) {
+  if (slope > -EPSILON && slope < EPSILON)
+  {
     return false;
   }
 
@@ -782,15 +829,18 @@ __device__ bool CheckLineSegmentIntersect(glm::vec2 startPoint, glm::vec2 endPoi
   float maxY = y1 > y2 ? y1 : y2;
   float minY = y1 > y2 ? y2 : y1;
 
-  if (yIntercept <= minY) {
+  if (yIntercept <= minY)
+  {
     return false;
   }
 
-  if (yIntercept > maxY) {
+  if (yIntercept > maxY)
+  {
     return false;
   }
 
-  if (slope == INFINITY) {
+  if (slope == INFINITY)
+  {
     (*xCoord) = startPoint.x;
     return true;
   }
@@ -810,7 +860,8 @@ __device__ float GetLineSegmentSlope(const glm::vec2& startPoint, const glm::vec
   // y2 - y1
   const float num = endPoint[1] - startPoint[1];
 
-  if (denom > -EPSILON && denom < EPSILON) {
+  if (denom > -EPSILON && denom < EPSILON)
+  {
     return INFINITY;
   }
 
@@ -818,12 +869,15 @@ __device__ float GetLineSegmentSlope(const glm::vec2& startPoint, const glm::vec
   return slope;
 }
 
-__device__ bool BoundingBoxContains(const BoundingBox& box, float x, float y) {
-  if (x < box.min.x - EPSILON || x > box.max.x + EPSILON) {
+__device__ bool BoundingBoxContains(const BoundingBox& box, float x, float y)
+{
+  if (x < box.min.x - EPSILON || x > box.max.x + EPSILON)
+  {
     return false;
   }
 
-  if (y < box.min.y - EPSILON || y > box.max.y + EPSILON) {
+  if (y < box.min.y - EPSILON || y > box.max.y + EPSILON)
+  {
     return false;
   }
 
@@ -832,17 +886,17 @@ __device__ bool BoundingBoxContains(const BoundingBox& box, float x, float y) {
 
 
 __device__ bool CalculateIntersection(const glm::vec2& p0,
-    const glm::vec2& p1,
-    const glm::vec2& p2,
-    float slope0,
-    float slope1,
-    float slope2,
-    const BoundingBox& box,
-    float& startX,
-    float& endX,
-    int yIntercept
-  ) {
-
+                                      const glm::vec2& p1,
+                                      const glm::vec2& p2,
+                                      float slope0,
+                                      float slope1,
+                                      float slope2,
+                                      const BoundingBox& box,
+                                      float& startX,
+                                      float& endX,
+                                      int yIntercept
+)
+{
   float xResult1 = 0.0f;
   float xResult2 = 0.0f;
 
@@ -856,27 +910,34 @@ __device__ bool CalculateIntersection(const glm::vec2& p0,
 
   int pointsCount = 0;
 
-  if (result1 && BoundingBoxContains(box, x1, yIntercept)) {
+  if (result1 && BoundingBoxContains(box, x1, yIntercept))
+  {
     pointsCount++;
     xResult1 = x1;
   }
 
-  if (result2 && BoundingBoxContains(box, x2, yIntercept)) {
+  if (result2 && BoundingBoxContains(box, x2, yIntercept))
+  {
     pointsCount++;
 
-    if (pointsCount == 2) {
+    if (pointsCount == 2)
+    {
       xResult2 = x2;
-    } else {
+    }
+    else
+    {
       xResult1 = x2;
     }
   }
 
-  if (result3 && BoundingBoxContains(box, x3, yIntercept)) {
+  if (result3 && BoundingBoxContains(box, x3, yIntercept))
+  {
     pointsCount++;
     xResult2 = x3;
   }
 
-  if (pointsCount == 2) {
+  if (pointsCount == 2)
+  {
     startX = xResult1 > xResult2 ? xResult2 : xResult1;
     endX = xResult1 > xResult2 ? xResult1 : xResult2;
 
@@ -889,32 +950,31 @@ __device__ bool CalculateIntersection(const glm::vec2& p0,
   return false;
 }
 
-__device__ void TryStoreFragment(const Primitive& target, float xCoord, int yCoord, int screenWidth, int screenHeight, const VertexOut& v1, const VertexOut& v2, const VertexOut& v3, const glm::vec3& baryCoordinates, int pixelIndex, int* depth, Fragment* fragmentBuffer) {
+__device__ void TryStoreFragment(const Primitive& target, float xCoord, int yCoord, int screenWidth, int screenHeight,
+                                 const VertexOut& v1, const VertexOut& v2, const VertexOut& v3,
+                                 const glm::vec3& baryCoordinates, int pixelIndex, int* depth, Fragment* fragmentBuffer)
+{
   const float ratio1 = baryCoordinates.x;
   const float ratio2 = baryCoordinates.y;
   const float ratio3 = baryCoordinates.z;
 
   // pos[2] holds NDC Z [0,1]
-  const float fragmentDepth = 1.0f / ((ratio1 * (1.0f / v1.pos[2])) + (ratio2 * (1.0f / v2.pos[2])) +(ratio3 * (1.0f / v3.pos[2])));
+  const float fragmentDepth = 1.0f / ((ratio1 * (1.0f / v1.pos[2])) + (ratio2 * (1.0f / v2.pos[2])) + (ratio3 * (1.0f /
+    v3.pos[2])));
   const int fragmentIntegerDepth = fragmentDepth * INT_MAX;
 
-  // const glm::vec3 vertexOutColor = fragmentDepth * ((ratio1 * (colorP1 / v1.pos[2])) + (ratio2 * (colorP2 / v2.pos[2])) + (ratio3 * (colorP3 / v3.pos[2])));;
+  const glm::vec2 interpolatedUV = fragmentDepth * ((ratio1 * (v1.texcoord0 / v1.pos[2])) + (ratio2 * (v2.texcoord0 / v2
+    .pos[2])) + (ratio3 * (v3.texcoord0 / v3.pos[2])));
+  const glm::vec3 interpolatedEyeNormal = fragmentDepth * ((ratio1 * (v1.eyeNor / v1.pos[2])) + (ratio2 * (v2.eyeNor /
+    v2.pos[2])) + (ratio3 * (v3.eyeNor / v3.pos[2])));
+  const glm::vec3 interpolatedEyePos = fragmentDepth * ((ratio1 * (v1.eyePos / v1.pos[2])) + (ratio2 * (v2.eyePos / v2.
+    pos[2])) + (ratio3 * (v3.eyePos / v3.pos[2])));
 
-  const glm::vec2 interpolatedUV = fragmentDepth * ((ratio1 * (v1.texcoord0 / v1.pos[2])) + (ratio2 * (v2.texcoord0 / v2.pos[2])) + (ratio3 * (v3.texcoord0 / v3.pos[2])));
-  const glm::vec3 interpolatedEyeNormal = fragmentDepth * ((ratio1 * (v1.eyeNor / v1.pos[2])) + (ratio2 * (v2.eyeNor / v2.pos[2])) + (ratio3 * (v3.eyeNor / v3.pos[2])));
-  const glm::vec3 interpolatedEyePos = fragmentDepth * ((ratio1 * (v1.eyePos / v1.pos[2])) + (ratio2 * (v2.eyePos / v2.pos[2])) + (ratio3 * (v3.eyePos / v3.pos[2])));
- 
-  //color = Triangle::BaryInterpolateColor(v1, v2, v3, targetPoint);
-
-  //color = AddLighting(color, v1, v2, v3, targetPoint);
-
-  //color = color * 255.0f;
-
-  //int idx = ToLinearCoords(xCoord, yCoord);
-  //Fragment frag = m_fragments[idx];
+  const glm::vec3 interpolatedColor = fragmentDepth * ((ratio1 * (v1.col / v1.pos[2])) + (ratio2 * (v2.col / v2.
+    pos[2])) + (ratio3 * (v3.col / v3.pos[2])));
 
   Fragment targetFragment;
-  targetFragment.color = glm::vec3(1, 0, 0);
+  targetFragment.color = interpolatedColor;
   targetFragment.uv = interpolatedUV;
   targetFragment.normal = interpolatedEyeNormal;
   targetFragment.pos = interpolatedEyePos;
@@ -924,45 +984,99 @@ __device__ void TryStoreFragment(const Primitive& target, float xCoord, int yCoo
 
   const int minDepth = atomicMin(&depth[pixelIndex], fragmentIntegerDepth);
 
-  if (minDepth > fragmentIntegerDepth) {
+  if (minDepth > fragmentIntegerDepth)
+  {
     depth[pixelIndex] = fragmentIntegerDepth;
     fragmentBuffer[pixelIndex] = targetFragment;
   }
-  //
-  // if (frag.m_isActive && frag.m_depth > fragmentDepth) {
-  //   m_fragments[idx] = Fragment(fragmentDepth, color);
-  // } else if (!frag.m_isActive) {
-  //   m_fragments[idx] = Fragment(fragmentDepth, color);
-  // }
+}
 
-  // Old Draw Commands
-  // QRgb value = qRgb(color[0], color[1], color[2]);
-  // m_renderTarget.setPixel(ceil(k), ceil(rowY), value);
+__device__ void TryStoreFragmentLine(const Primitive& target, float xCoord, int yCoord, int screenWidth, int screenHeight,
+  const VertexOut& v1, const VertexOut& v2, int pixelIndex, int* depth, Fragment* fragmentBuffer)
+{
+  // // pos[2] holds NDC Z [0,1]
+  // const float fragmentDepth = 1.0f / ((ratio1 * (1.0f / v1.pos[2])) + (ratio2 * (1.0f / v2.pos[2])) + (ratio3 * (1.0f /
+  //   v3.pos[2])));
+  // const int fragmentIntegerDepth = fragmentDepth * INT_MAX;
+  //
+  // const glm::vec2 interpolatedUV = fragmentDepth * ((ratio1 * (v1.texcoord0 / v1.pos[2])) + (ratio2 * (v2.texcoord0 / v2
+  //   .pos[2])) + (ratio3 * (v3.texcoord0 / v3.pos[2])));
+  // const glm::vec3 interpolatedEyeNormal = fragmentDepth * ((ratio1 * (v1.eyeNor / v1.pos[2])) + (ratio2 * (v2.eyeNor /
+  //   v2.pos[2])) + (ratio3 * (v3.eyeNor / v3.pos[2])));
+  // const glm::vec3 interpolatedEyePos = fragmentDepth * ((ratio1 * (v1.eyePos / v1.pos[2])) + (ratio2 * (v2.eyePos / v2.
+  //   pos[2])) + (ratio3 * (v3.eyePos / v3.pos[2])));
+  //
+  // Fragment targetFragment;
+  // targetFragment.color = glm::vec3(1, 0, 0);
+  // targetFragment.uv = interpolatedUV;
+  // targetFragment.normal = interpolatedEyeNormal;
+  // targetFragment.pos = interpolatedEyePos;
+  // targetFragment.dev_diffuseTex = v1.dev_diffuseTex;
+  // targetFragment.diffuseTexWidth = v1.diffuseTexWidth;
+  // targetFragment.diffuseTexHeight = v1.diffuseTexHeight;
+  //
+  // const int minDepth = atomicMin(&depth[pixelIndex], fragmentIntegerDepth);
+  //
+  // if (minDepth > fragmentIntegerDepth)
+  // {
+  //   depth[pixelIndex] = fragmentIntegerDepth;
+  //   fragmentBuffer[pixelIndex] = targetFragment;
+  // }
+}
+
+__device__ void TryStoreFragmentPoint(const Primitive& target, float xCoord, int yCoord, int screenWidth, int screenHeight,
+  const VertexOut& v1, int pixelIndex, int* depth, Fragment* fragmentBuffer)
+{
+  // pos[2] holds NDC Z [0,1]
+  const float fragmentDepth = v1.pos[2];
+  const int fragmentIntegerDepth = fragmentDepth * INT_MAX;
+  
+  const glm::vec2 interpolatedUV = v1.texcoord0;
+  const glm::vec3 interpolatedEyeNormal = v1.eyeNor;
+  const glm::vec3 interpolatedEyePos = v1.eyePos;
+  const glm::vec3 interpolatedColor = v1.col;
+  
+  Fragment targetFragment;
+  targetFragment.color = interpolatedColor;
+  targetFragment.uv = interpolatedUV;
+  targetFragment.normal = interpolatedEyeNormal;
+  targetFragment.pos = interpolatedEyePos;
+  targetFragment.dev_diffuseTex = v1.dev_diffuseTex;
+  targetFragment.diffuseTexWidth = v1.diffuseTexWidth;
+  targetFragment.diffuseTexHeight = v1.diffuseTexHeight;
+  
+  const int minDepth = atomicMin(&depth[pixelIndex], fragmentIntegerDepth);
+  
+  if (minDepth > fragmentIntegerDepth)
+  {
+    depth[pixelIndex] = fragmentIntegerDepth;
+    fragmentBuffer[pixelIndex] = targetFragment;
+  }
 }
 
 // #define USE_LINE_SEGMENT_CHECK
 #define USE_BARY_CHECK
 
-__global__ void _rasterizer(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth, Fragment* fragmentBuffer)
+__global__ void _rasterizeTriangles(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth,
+                            Fragment* fragmentBuffer)
 {
   // primitive id
   int primtiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
 
   if (primtiveId >= numPrimitives)
   {
-
     return;
   }
 
   const Primitive& target = dev_primitives[primtiveId];
 
-  // if (target.primitiveType == Triangle)
-  // {
-  const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
-  const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
-  const glm::vec2 p2 = glm::vec2(target.v[2].pos[0], target.v[2].pos[1]);
+  if (target.primitiveType == Triangle)
+  {
+    const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+    const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
+    const glm::vec2 p2 = glm::vec2(target.v[2].pos[0], target.v[2].pos[1]);
 
-  const BoundingBox boundingBox = getBoundingBoxForTriangle(p0, p1, p2);
+    const BoundingBox boundingBox = getBoundingBoxForTriangle(p0, p1, p2);
 
 #ifdef USE_LINE_SEGMENT_CHECK
   int rasterStartY = floor(boundingBox.min.y);
@@ -996,34 +1110,157 @@ __global__ void _rasterizer(int numPrimitives, Primitive* dev_primitives, int sc
 #endif
 
 #ifdef USE_BARY_CHECK
-  int rasterStartX = floor(boundingBox.min.x);
-  int rasterEndX = ceil(boundingBox.max.x);
+    int rasterStartX = floor(boundingBox.min.x);
+    int rasterEndX = ceil(boundingBox.max.x);
 
-  ClampRangeInt(rasterStartX, rasterEndX, 0, screenWidth - 1);
+    ClampRangeInt(rasterStartX, rasterEndX, 0, screenWidth - 1);
 
-  for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue) {
+    for (int xValue = rasterStartX; xValue <= rasterEndX; ++xValue)
+    {
+      int rasterStartY = floor(boundingBox.min.y);
+      int rasterEndY = ceil(boundingBox.max.y);
+      ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+
+      for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1)
+      {
+        const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
+
+        if (!isBarycentricCoordInBounds(baryCoordinates))
+        {
+          continue;
+        }
+
+        const int pixelIndex = xValue + (yValue * screenWidth);
+        TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2],
+                         baryCoordinates, pixelIndex, depth, fragmentBuffer);
+      }
+    }
+#endif
+  }
+
+  else if (target.primitiveType == Line)
+  {
+    const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+    const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
+
+    const BoundingBox boundingBox = getBoundingBoxForLine(p0, p1);
 
     int rasterStartY = floor(boundingBox.min.y);
     int rasterEndY = ceil(boundingBox.max.y);
     ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
 
+    const float slope0 = GetLineSegmentSlope(p0, p1);
+
     for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
+      float xIntercept;
 
-      const glm::vec3 baryCoordinates = calculateBarycentricCoordinate(p0, p1, p2, glm::vec2(xValue, yValue));
+      const bool doesIntersect = CheckLineSegmentIntersect(p0, p1, yValue, slope0, &xIntercept);
 
-      if (!isBarycentricCoordInBounds(baryCoordinates))
+      if (!doesIntersect)
       {
         continue;
       }
 
+      int xValue = (int)glm::clamp(xIntercept, 0.0f, float(screenWidth - 1));
+
       const int pixelIndex = xValue + (yValue * screenWidth);
-      TryStoreFragment(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], target.v[2], baryCoordinates, pixelIndex, depth, fragmentBuffer);
+      TryStoreFragmentLine(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], pixelIndex, depth, fragmentBuffer);
     }
   }
-#endif
-// }
+
+  else if (target.primitiveType == Point)
+  {
+    const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+    const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
+
+    const BoundingBox boundingBox = getBoundingBoxForLine(p0, p1);
+
+    int rasterStartY = floor(boundingBox.min.y);
+    int rasterEndY = ceil(boundingBox.max.y);
+    ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+
+    const float slope0 = GetLineSegmentSlope(p0, p1);
+
+    for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
+      float xIntercept;
+
+      const bool doesIntersect = CheckLineSegmentIntersect(p0, p1, yValue, slope0, &xIntercept);
+
+      if (!doesIntersect)
+      {
+        continue;
+      }
+
+      int xValue = (int)glm::clamp(xIntercept, 0.0f, float(screenWidth - 1));
+
+      const int pixelIndex = xValue + (yValue * screenWidth);
+      TryStoreFragmentLine(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], pixelIndex, depth, fragmentBuffer);
+    }
+  }
 }
 
+__global__ void _rasterizeLines(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth,
+  Fragment* fragmentBuffer)
+{
+  // primitive id
+  int primtiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+  if (primtiveId >= numPrimitives)
+  {
+    return;
+  }
+
+  const Primitive& target = dev_primitives[primtiveId];
+
+  const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+  const glm::vec2 p1 = glm::vec2(target.v[1].pos[0], target.v[1].pos[1]);
+
+  const BoundingBox boundingBox = getBoundingBoxForLine(p0, p1);
+
+  int rasterStartY = floor(boundingBox.min.y);
+  int rasterEndY = ceil(boundingBox.max.y);
+  ClampRangeInt(rasterStartY, rasterEndY, 0, screenHeight - 1);
+
+  const float slope0 = GetLineSegmentSlope(p0, p1);
+
+  for (int yValue = rasterStartY; yValue <= rasterEndY; yValue += 1) {
+    float xIntercept;
+
+    const bool doesIntersect = CheckLineSegmentIntersect(p0, p1, yValue, slope0, &xIntercept);
+
+    if (!doesIntersect)
+    {
+      continue;
+    }
+
+    const int xValue = (int)glm::clamp(xIntercept, 0.0f, float(screenWidth - 1));
+
+    const int pixelIndex = xValue + (yValue * screenWidth);
+    TryStoreFragmentLine(target, xValue, yValue, screenWidth, screenHeight, target.v[0], target.v[1], pixelIndex, depth, fragmentBuffer);
+  }
+}
+
+__global__ void _rasterizePoints(int numPrimitives, Primitive* dev_primitives, int screenWidth, int screenHeight, int* depth,
+  Fragment* fragmentBuffer)
+{
+  // primitive id
+  int primtiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+  if (primtiveId >= numPrimitives)
+  {
+    return;
+  }
+
+  const Primitive& target = dev_primitives[primtiveId];
+
+  const glm::vec2 p0 = glm::vec2(target.v[0].pos[0], target.v[0].pos[1]);
+
+  const int xValue = glm::clamp((int)glm::round(p0.x), 0, screenWidth - 1);
+  const int yValue = glm::clamp((int)glm::round(p0.y), 0, screenHeight - 1);
+
+  const int pixelIndex = xValue + (yValue * screenWidth);
+  TryStoreFragmentPoint(target, xValue, yValue, screenWidth, screenHeight, target.v[0], pixelIndex, depth, fragmentBuffer);
+}
 
 /**
  * Perform rasterization.
@@ -1062,7 +1299,8 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
       (p->numIndices,
        curPrimitiveBeginId,
        dev_primitives,
-       *p);
+       *p,
+        GLOBAL_DRAW_MODE);
       checkCUDAError("Primitive Assembly");
 
       curPrimitiveBeginId += p->numPrimitives;
@@ -1077,13 +1315,25 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
   // TODO: rasterize
   const int blockSize1d = 512;
   dim3 numRasterizeBlocks = (curPrimitiveBeginId + blockSize1d - 1) / blockSize1d;
-  _rasterizer <<< numRasterizeBlocks, blockSize1d >>> (curPrimitiveBeginId, dev_primitives, width, height, dev_depth, dev_fragmentBuffer);
+
+  if (GLOBAL_DRAW_MODE == Triangle) {
+    _rasterizeTriangles <<< numRasterizeBlocks, blockSize1d >>> (curPrimitiveBeginId, dev_primitives, width, height, dev_depth,
+      dev_fragmentBuffer);
+  }
+  else if (GLOBAL_DRAW_MODE == Line) {
+    _rasterizeLines <<< numRasterizeBlocks, blockSize1d >>> (curPrimitiveBeginId, dev_primitives, width, height, dev_depth,
+      dev_fragmentBuffer);
+  }
+  else if (GLOBAL_DRAW_MODE == Point) {
+    _rasterizePoints <<< numRasterizeBlocks, blockSize1d >>> (curPrimitiveBeginId, dev_primitives, width, height, dev_depth,
+      dev_fragmentBuffer);
+  }
 
   // Copy depthbuffer colors into framebuffer
   render <<< blockCount2d, blockSize2d >>>(width, height, dev_fragmentBuffer, dev_framebuffer);
   checkCUDAError("fragment shader");
   // Copy framebuffer into OpenGL buffer for OpenGL previewing
-  sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+  sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, baseWidth, baseHeight, ALIASING_VALUE, dev_framebuffer);
   checkCUDAError("copy render result to pbo");
 }
 
