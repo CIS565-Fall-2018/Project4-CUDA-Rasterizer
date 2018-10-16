@@ -43,7 +43,7 @@ namespace {
 
 		glm::vec3 eyePos;	// eye space position used for shading
 		glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
-		// glm::vec3 color;
+		glm::vec3 color;
 		glm::vec2 texcoord0;
 		TextureData* dev_diffuseTex = NULL;
 		// int texWidth, texHeight;
@@ -146,7 +146,7 @@ void render(const int w, const int h, Fragment *fragmentBuffer, glm::vec3 *frame
 
     if (x < w && y < h) {
 		// TODO: add your fragment shader code here
-		float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, glm::vec3(-0.5774, 0.5774f, 0.5774f)), 0.f, 1.f);
+		float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, glm::vec3(-0.5774, -0.5774f, 0.5774f)), 0.06f, 1.0f);
 		framebuffer[index] = fragmentBuffer[index].color * lambert;
     }
 }
@@ -653,8 +653,9 @@ void _vertexTransformAndAssembly(
 		// Assemble all attribute arrays into the primitive array
 		vertex.dev_diffuseTex = primitive.dev_diffuseTex;
 		vertex.texcoord0 = primitive.dev_texcoord0[vid];
-		vertex.eyeNor = glm::normalize(glm::vec3(MV_normal * primitive.dev_normal[vid]));
 		vertex.eyePos = glm::vec3(MV * glm::vec4(pos, 1));
+		vertex.eyeNor = glm::normalize(MV_normal * primitive.dev_normal[vid]);
+		vertex.color = glm::vec3(1);
 
 	}
 }
@@ -712,9 +713,10 @@ void scanline(int width, int height, int numPrimitives, Primitive* primitives, F
 						if (!locked) {
 							// Critical section
 							if (zdepth < depth[index]) {
-								fragments[index].color = glm::vec3(1);
-								const glm::vec3 eyeNor[] = { glm::vec3(prim.v[0].eyeNor), glm::vec3(prim.v[1].eyeNor), glm::vec3(prim.v[2].eyeNor) };
-								fragments[index].eyeNor = glm::normalize(calculateBarycentricCoordinate(eyeNor, glm::vec2(x, y)));
+								fragments[index].color = glm::vec3(bary.x * prim.v[0].color +
+									bary.y * glm::vec3(prim.v[1].color) + bary.z * glm::vec3(prim.v[2].color));
+								fragments[index].eyeNor = glm::vec3(bary.x * prim.v[0].eyeNor +
+									bary.y * glm::vec3(prim.v[1].eyeNor) + bary.z * glm::vec3(prim.v[2].eyeNor));
 								depth[index] = zdepth;
 							}
 							mutex[index] = 0;
