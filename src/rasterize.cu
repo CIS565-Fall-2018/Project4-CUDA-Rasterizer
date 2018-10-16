@@ -20,10 +20,14 @@
 
 #include <math.h>
 
+#define MODE_TRIANGLE	0
+#define MODE_POINT		1
+
 #define OPTION_ENABLE_LAMBERT			0
 #define OPTION_ENABLE_SSAA				0
 #define OPTION_SSAA_GRID_SIZE 			2
 #define OPTION_ENABLE_BACK_FACE_CULLING	1
+#define OPTION_SELECT_MODE				MODE_TRIANGLE
 
 #define RANDOM_SEED					1337L
 #define SSAA_GRID_AREA				OPTION_SSAA_GRID_SIZE * OPTION_SSAA_GRID_SIZE
@@ -250,7 +254,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *frameBuffer) {
 
     if (x < w && y < h) {
         frameBuffer[index] = fragmentBuffer[index].color;
-
+#if OPTION_SELECT_MODE == MODE_TRIANGLE
 		// TODO: add your fragment shader code here
 #if OPTION_ENABLE_LAMBERT
         // Adapted from https://www.opengl.org/sdk/docs/tutorials/ClockworkCoders/lighting.php
@@ -261,6 +265,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *frameBuffer) {
         float Idiff = glm::dot(L, N);
         Idiff = glm::clamp(Idiff, 0.0f, 1.0f);
         frameBuffer[index] = Idiff * fragmentBuffer[index].color;
+#endif
+//End MODE_TRIANGLE
 #endif
     }
 }
@@ -850,6 +856,7 @@ __global__ void rasterizePrimitive (
 	}
 #endif
 
+#if OPTION_SELECT_MODE == MODE_TRIANGLE
 	//Triangle, defined by three points, used to get AABB
 	glm::vec3 points[3];
 	points[0] = glm::vec3(dev_primitives[idx].v[0].pos);
@@ -897,6 +904,19 @@ __global__ void rasterizePrimitive (
 			}
 		}
 	}
+#elif OPTION_SELECT_MODE == MODE_POINT
+	//Iterate thru triangle, generating point at each vertex
+	for (int i = 0; i < 3; i++) {
+		int x = dev_primitives[idx].v[i].pos.x;
+		int y = dev_primitives[idx].v[i].pos.y;
+		int pointIdx = y * width + x;
+
+		//Set to static (white) color
+		dev_fragmentBuffer[pointIdx].color = glm::vec3(1, 1, 1);
+	}
+#else
+	printf("ERROR: Invalid mode selected\n");
+#endif
 }
 
 
