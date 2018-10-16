@@ -1,0 +1,172 @@
+{
+    "asset": {
+        "copyright": "(C)2018 vasum",
+        "generator": "Maya2glTF V0.9.10 b7c0eed",
+        "version": "2.0"
+    },
+    "scenes": [
+        {
+            "nodes": [
+                0
+            ]
+        }
+    ],
+    "scene": 0,
+    "nodes": [
+        {
+            "mesh": 0,
+            "name": "SphereMesh"
+        }
+    ],
+    "meshes": [
+        {
+            "primitives": [
+                {
+                    "attributes": {
+                        "NORMAL": 1,
+                        "POSITION": 2,
+                        "TANGENT": 3,
+                        "TEXCOORD_0": 4
+                    },
+                    "indices": 0,
+                    "mode": 4,
+                    "material": 0
+                }
+            ],
+            "name": "SphereMeshShape"
+        }
+    ],
+    "accessors": [
+        {
+            "bufferView": 0,
+            "byteOffset": 0,
+            "componentType": 5123,
+            "count": 14700,
+            "max": [
+                2598
+            ],
+            "min": [
+                0
+            ],
+            "type": "SCALAR"
+        },
+        {
+            "bufferView": 1,
+            "byteOffset": 0,
+            "componentType": 5126,
+            "count": 2599,
+            "max": [
+                1.0,
+                1.0,
+                0.9980267882347108
+            ],
+            "min": [
+                -1.0,
+                -1.0,
+                -0.9980268478393556
+            ],
+            "type": "VEC3"
+        },
+        {
+            "bufferView": 1,
+            "byteOffset": 31188,
+            "componentType": 5126,
+            "count": 2599,
+            "max": [
+                1.0,
+                1.0,
+                0.9980270266532898
+            ],
+            "min": [
+                -1.0000005960464478,
+                -1.0,
+                -0.9980275630950928
+            ],
+            "type": "VEC3"
+        },
+        {
+            "bufferView": 2,
+            "byteOffset": 0,
+            "componentType": 5126,
+            "count": 2599,
+            "max": [
+                1.0,
+                0.03137221932411194,
+                1.0,
+                1.0
+            ],
+            "min": [
+                -1.0,
+                -0.03137212246656418,
+                -1.0,
+                1.0
+            ],
+            "type": "VEC4"
+        },
+        {
+            "bufferView": 3,
+            "byteOffset": 0,
+            "componentType": 5126,
+            "count": 2599,
+            "max": [
+                0.9999995827674866,
+                1.0
+            ],
+            "min": [
+                0.0,
+                0.0
+            ],
+            "type": "VEC2"
+        }
+    ],
+    "materials": [
+        {
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [
+                    0.4000000059604645,
+                    0.4000000059604645,
+                    0.4000000059604645,
+                    1.0
+                ],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 1.0
+            },
+            "name": "lambert1"
+        }
+    ],
+    "bufferViews": [
+        {
+            "buffer": 0,
+            "byteOffset": 124752,
+            "byteLength": 29400,
+            "target": 34963
+        },
+        {
+            "buffer": 0,
+            "byteOffset": 41584,
+            "byteLength": 62376,
+            "byteStride": 12,
+            "target": 34962
+        },
+        {
+            "buffer": 0,
+            "byteOffset": 0,
+            "byteLength": 41584,
+            "byteStride": 16,
+            "target": 34962
+        },
+        {
+            "buffer": 0,
+            "byteOffset": 103960,
+            "byteLength": 20792,
+            "byteStride": 8,
+            "target": 34962
+        }
+    ],
+    "buffers": [
+        {
+            "byteLength": 154152,
+            "uri": "SphereMesh4.bin"
+        }
+    ]
+}

@@ -1,19 +1,64 @@
 CUDA Rasterizer
 ===============
 
-[CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
+**University of Pennsylvania, CIS 565: GPU Programming and Architecture,
+Project 3 - CUDA Path Tracer**
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
+* Vasu Mahesh
+  * [LinkedIn](http://linkedin.com/in/vasumahesh)
+  * [Code Blog](http://www.codeplaysleep.com)
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
 
-### (TODO: Your README)
+![](images/cover.PNG)
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+### Algorithm performance
 
+```
+Algorithm 1:
+
+Go through every Y in AABB of Triangle:
+  Go through every X in AABB of Triangle:
+    if inside Triangle:
+      Shade Pixel
+
+// -----
+
+Algorithm 2:
+
+Go through every Y in AABB of Triangle:
+  Find the range of X to fill for the triangle by intersecting the 3 line segments
+
+  Go through every X in range of Triangle:
+    Shade Pixel
+```
+
+![](images/triangle_fill_graph.PNG)
+
+
+### Perspective Correct Color interpolation
+
+Correct Barycentric Interpolation
+
+![](images/color_bary_interp.PNG)
+
+
+### Texture Sampling
+
+Implemented basic texture sampling
+
+![](images/texture.PNG)
+
+
+### Anti-aliasing
+
+Implemented super sampled AA
+
+![](images/aa_graph.PNG)
+
+
+| With AA | No AA |
+|:-----:|:-------:|
+|![](images/Duck4X.PNG)|![](images/DuckNoAA.PNG) |
 
 ### Credits
 
