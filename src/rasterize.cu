@@ -132,7 +132,7 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
         pbo[index].x = color.x;
-        pbo[index].y = color.y;
+		pbo[index].y = color.y;
         pbo[index].z = color.z;
     }
 }
