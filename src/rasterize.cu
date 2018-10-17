@@ -103,7 +103,6 @@ namespace {
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
 static int *mutex;
-static int screenDepth;
 
 static int width = 0;
 static int height = 0;
@@ -181,8 +180,6 @@ void rasterizeInit(int w, int h) {
 
 	cudaMalloc((void **)&mutex, width * height * sizeof(int));
 	cudaMemset(mutex, 0, width * height * sizeof(int));
-
-	screenDepth = INT_MAX;
 
 	checkCUDAError("rasterizeInit");
 }
@@ -310,6 +307,18 @@ void traverseNode (
 	for (; it != itEnd; ++it) {
 		traverseNode(n2m, scene, *it, M);
 	}
+}
+
+__host__ __device__ static
+float perspCorrectZ(const glm::vec3 vertices[3], const glm::vec3 &barycentric) {
+	float sum = (barycentric[0] / vertices[0][2]) + (barycentric[1] / vertices[1][2]) + (barycentric[2] / vertices[2][2]);
+	return 1.0 / sum;
+}
+
+__host__ __device__ static
+glm::vec3 perspCorrectInterp(const glm::vec3 vertices[3], const float &z, const glm::vec3 values[3], const glm::vec3 &barycentric) {
+	glm::vec3 sum = (barycentric[0] * values[0] / vertices[0][2]) + (barycentric[1] * values[1] / vertices[1][2]) + (barycentric[2] * values[2] / vertices[2][2]);
+	return sum * z;
 }
 
 void rasterizeSetBuffers(const tinygltf::Scene & scene) {
@@ -663,17 +672,12 @@ void _vertexTransformAndAssembly(
 
 		glm::vec4 projected = glm::vec4(position, 1) * MVP;
 		projected /= projected.w;
-		projected.x = (projected.x + 1.f) * 0.5f;
-		projected.y = (1.f - projected.y) * 0.5f;
-		projected.x *= width;
-		projected.y *= height;
-		projected.z = (projected.z + 1.f) * 0.5f;
 
-		vertex.pos = projected;
+		vertex.pos = glm::vec4((projected.x + 1.f) * width * 0.5f, (1.f - projected.y) * height * 0.5f, (projected.z + 1.f) * 0.5f, 1.0);
 		vertex.eyePos = glm::vec3(MV * glm::vec4(position, 1));
 		vertex.eyeNor = glm::normalize(MV_normal * normal);
 
-		// Give the vertex a random color
+		// Give the vertex a random color or texture color
 		if (primitive.dev_diffuseTex == NULL) {
 			vertex.dev_diffuseTex = NULL;
 			thrust::default_random_engine rng = thrust::default_random_engine(utilhash(vid + 11));
@@ -731,13 +735,14 @@ void rasterizeKernel(int numPrimitives, int width, int height, Fragment *fragmen
 	int idx = x + (y * width);
 
 	if (idx < numPrimitives) {
-		Primitive &p = dev_primitives[idx];
-		glm::vec3 tri[3];
-		tri[0] = glm::vec3(p.v[0].pos);
-		tri[1] = glm::vec3(p.v[1].pos);
-		tri[2] = glm::vec3(p.v[2].pos);
+		Primitive &primitive = dev_primitives[idx];
+		glm::vec3 tri[3] = { glm::vec3(primitive.v[0].pos), glm::vec3(primitive.v[1].pos), glm::vec3(primitive.v[2].pos) };
 
 		AABB aabb = getAABBForTriangle(tri);
+		aabb.min.x = glm::min((float)width - 1, glm::max(0.f, aabb.min.x));
+		aabb.min.y = glm::min((float)height - 1, glm::max(0.f, aabb.min.y));
+		aabb.max.x = glm::max(0.f, glm::min((float)width - 1, aabb.max.x));
+		aabb.max.y = glm::max(0.f, glm::min((float)height - 1, aabb.max.y));
 
 		for (int col = aabb.min.x; col <= aabb.max.x; ++col) {
 			for (int row = aabb.min.y; row <= aabb.max.y; ++row) {
@@ -760,55 +765,48 @@ void rasterizeKernel(int numPrimitives, int width, int height, Fragment *fragmen
 								depth[fragmentIndex] = fragmentDepth;
 
 								// Perspective correct z
-								glm::vec3 eyeTri[3];
-								eyeTri[0] = glm::vec3(p.v[0].eyePos);
-								eyeTri[1] = glm::vec3(p.v[1].eyePos);
-								eyeTri[2] = glm::vec3(p.v[2].eyePos);
-								float z = perspCorrectZ(eyeTri, bary);
+								glm::vec3 eyeTri[3] = { glm::vec3(primitive.v[0].eyePos), glm::vec3(primitive.v[1].eyePos), glm::vec3(primitive.v[2].eyePos) };
+								float perspZ = perspCorrectZ(eyeTri, bary);
 
 								// Calculate normal
-								glm::vec3 normals[3];
-								normals[0] = p.v[0].eyeNor;
-								normals[1] = p.v[1].eyeNor;
-								normals[2] = p.v[2].eyeNor;
-								fragment.eyeNor = glm::normalize(perspCorrectInterp(eyeTri, z, normals, bary));
+								glm::vec3 normals[3] = { primitive.v[0].eyeNor, primitive.v[1].eyeNor, primitive.v[2].eyeNor };
+								fragment.eyeNor = glm::normalize(perspCorrectInterp(eyeTri, perspZ, normals, bary));
 
-								if (p.v[0].dev_diffuseTex) {
-									glm::vec3 uv[3];
-									uv[0] = glm::vec3(p.v[0].texcoord0, 0);
-									uv[1] = glm::vec3(p.v[1].texcoord0, 0);
-									uv[2] = glm::vec3(p.v[2].texcoord0, 0);
+								if (primitive.v[0].dev_diffuseTex) {
+									glm::vec3 uv[3] = { glm::vec3(primitive.v[0].texcoord0, 0), glm::vec3(primitive.v[1].texcoord0, 0), glm::vec3(primitive.v[2].texcoord0, 0) };
 
-									//glm::vec3 final_uv = perspectiveCorrectInterpolation(eyeTri, z, uv, bary);
-									glm::vec2 final_uv = bary[0] * p.v[0].texcoord0 + bary[1] * p.v[1].texcoord0 + bary[2] * p.v[2].texcoord0;
-									float u = final_uv.x * p.v[0].texWidth;
-									float v = final_uv.y * p.v[0].texHeight;
+									glm::vec2 final_uv = bary[0] * primitive.v[0].texcoord0 + bary[1] * primitive.v[1].texcoord0 + bary[2] * primitive.v[2].texcoord0;
+									float u = final_uv.x * primitive.v[0].texWidth;
+									float v = final_uv.y * primitive.v[0].texHeight;
 
-									int u_i = glm::floor(u);
-									int v_i = glm::floor(v);
+									int uInt = glm::floor(u);
+									int vInt = glm::floor(v);
 
-									TextureData* tex = p.v[0].dev_diffuseTex;
+									TextureData* texture = primitive.v[0].dev_diffuseTex;
 
-									glm::vec3 final_col = glm::vec3(tex[(u_i + (v_i * p.v[0].texWidth)) * 3],
-										tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 1],
-										tex[((u_i + (v_i * p.v[0].texWidth)) * 3) + 2]) / 255.f;
+									float u_fract = u - glm::floor(u);
+									float v_fract = v - glm::floor(v);
 
-									fragment.color = glm::vec3(1.0, 0.0, 0.0);
-									/*fragment.color = p.v->color;
-									fragment.eyePos = p.v->eyePos;
-									fragment.eyeNor = p.v->eyeNor;
-									fragment.dev_diffuseTex = p.v->dev_diffuseTex;
-									fragment.texcoord0 = p.v->texcoord0;*/
+									int col_00_offset = (uInt + (vInt * primitive.v[0].texWidth)) * 3;
+									glm::vec3 col_00 = glm::vec3(texture[col_00_offset], texture[col_00_offset + 1], texture[col_00_offset + 2]);
+
+									int col_10_offset = (uInt + 1 + (vInt * primitive.v[0].texWidth)) * 3;
+									glm::vec3 col_10 = glm::vec3(texture[col_10_offset], texture[col_10_offset + 1], texture[col_10_offset + 2]);
+
+									int col_01_offset = (uInt + ((vInt + 1) * primitive.v[0].texWidth)) * 3;
+									glm::vec3 col_01 = glm::vec3(texture[col_01_offset], texture[col_01_offset + 1], texture[col_01_offset + 2]);
+
+									int col_11_offset = (uInt + 1 + ((vInt + 1) * primitive.v[0].texWidth)) * 3;
+									glm::vec3 col_11 = glm::vec3(texture[col_11_offset], texture[col_11_offset + 1], texture[col_11_offset + 2]);
+
+									glm::vec3 col_interp1 = glm::mix(col_00, col_10, u_fract);
+									glm::vec3 col_interp2 = glm::mix(col_01, col_11, u_fract);
+
+									fragment.color = glm::mix(col_interp1, col_interp2, v_fract) / 255.f;
 								}
 								else {
-									glm::vec3 colors[3];
-									colors[0] = p.v[0].color;
-									colors[1] = p.v[1].color;
-									colors[2] = p.v[2].color;
-
-									glm::vec3 final_color = perspCorrectInterp(eyeTri, z, colors, bary);
-
-									fragment.color = glm::vec3(1.0, 0.0, 0.0);
+									glm::vec3 colors[3] = { primitive.v[0].color, primitive.v[1].color, primitive.v[2].color };
+									fragment.color = perspCorrectInterp(eyeTri, perspZ, colors, bary);
 								}
 							}
 						}
