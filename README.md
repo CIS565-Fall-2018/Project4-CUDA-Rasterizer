@@ -13,11 +13,25 @@ CUDA Rasterizer
   
 ![Sample 1](renders/test2.gif)
   
-## Features
+## Features  
+  
+### Primitive Rasterization  
+  
+The current code supports triangles, lines, and points. Additionally, you can toggle wireframe mode and point cloud mode for triangles using the respective defined tokens at the beginning of rasterize.cu. Triangles and lines use perspective-correct interpolation to determine attributes of the overlapping fragments (see "Perspective-Correct Texture Mapping"). All supported modes still support textures and "paint normals" mode (using the interpolated normal as the color instead). By default, the fragment color is set to white.   
+Point Cloud:  
+  
+![Point Cloud w/ Normals](point_cloud.PNG)![Point Cloud w/ Texture](point_cloud2.PNG)
+  
+Wireframe:  
+  
+![Wireframe](wireframe.PNG)
 
+  
 ### Texturing
   
-![Sample 2](renders/test3.gif)
+![Sample 2](renders/test3.gif)  
+  
+Currently texture sampling for fragment colors is supported.  
   
 #### Bilinear Texture Filtering  
   
