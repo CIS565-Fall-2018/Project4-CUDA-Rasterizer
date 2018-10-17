@@ -708,12 +708,12 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
  * Rasterization kernel.
  */
 __global__
-void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primitive* dev_primitives, int* depth, int* mutex, int screenDepth) {
+void rasterizeKernel(int numPrimitives, int width, int height, Fragment *fragmentBuffer, Primitive* dev_primitives, int* depth, int* mutex) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-	int index = x + (y * w);
+	int index = x + (y * width);
 
-	if (index < numPrims) {
+	if (index < numPrimitives) {
 		Primitive &p = dev_primitives[index];
 		glm::vec3 tri[3];
 		tri[0] = glm::vec3(p.v[0].pos);
@@ -725,19 +725,21 @@ void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primi
 		for (int col = aabb.min.x; col <= aabb.max.x; ++col) {
 			for (int row = aabb.min.y; row <= aabb.max.y; ++row) {
 				glm::vec2 point = glm::vec2(col, row);
-				int fragmentIndex = index = col + (row * w);
+				//int fragmentIndex = glm::min(w * h, glm::max(0, col + (row * w)));
+				int fragmentIndex = col + (row * width);
+
 
 				glm::vec3 bary = calculateBarycentricCoordinate(tri, point);
 
 				if (isBarycentricCoordInBounds(bary)) {
 					bool isSet;
 					do {
-						isSet = (atomicCAS(&mutex[index], 0, 1) == 0);
+						isSet = (atomicCAS(&mutex[fragmentIndex], 0, 1) == 0);
 						if (isSet) {
-							fragmentBuffer[fragmentIndex].color = glm::vec3(p.v->color);
+							fragmentBuffer[fragmentIndex].color = glm::vec3(1.0, 0.0, 0.0);
 						}
 						if (isSet) {
-							mutex[index] = 0;
+							mutex[fragmentIndex] = 0;
 						}
 					} while (!isSet);
 				}
@@ -795,8 +797,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// TODO: rasterize
-	rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth, mutex, screenDepth);
-
+	rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth, mutex);
 
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
