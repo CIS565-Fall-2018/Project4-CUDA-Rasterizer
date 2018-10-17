@@ -11,6 +11,7 @@
 #include <cmath>
 #include <glm/glm.hpp>
 #include <util/utilityCore.hpp>
+#include <chrono>
 
 struct AABB {
     glm::vec3 min;
@@ -98,6 +99,32 @@ bool isBarycentricCoordInBounds(const glm::vec3 barycentricCoord) {
            barycentricCoord.z >= 0.0 && barycentricCoord.z <= 1.0;
 }
 
+#define POINT_TOLERANCE 5.f
+#define LINE_TOLERANCE 0.02f
+
+#define IS_SAME(a,b) abs(a - b) < POINT_TOLERANCE
+
+/**
+* Check if a barycentric coordinate is on the boundary of a triangle.
+*/
+__host__ __device__ static
+bool isBarycentricCoordOnBoundary(const glm::vec3 barycentricCoord) 
+{
+    return isBarycentricCoordInBounds(barycentricCoord) && (barycentricCoord.x <= LINE_TOLERANCE || barycentricCoord.y <= LINE_TOLERANCE ||
+        barycentricCoord.z <= LINE_TOLERANCE);
+}
+
+/**
+* Check if a barycentric coordinate is points of a triangle.
+*/
+__host__ __device__ static
+bool isBarycentricCoordOnVertices(const glm::vec3 tri[3], glm::vec2 point) 
+{
+   return (IS_SAME(point.x, tri[0].x) && IS_SAME(point.y, tri[0].y)) || 
+       (IS_SAME(point.x, tri[1].x) && IS_SAME(point.y, tri[1].y)) || 
+       (IS_SAME(point.x, tri[2].x) && IS_SAME(point.y, tri[2].y));
+}
+
 // CHECKITOUT
 /**
  * For a given barycentric coordinate, compute the corresponding z position
@@ -109,3 +136,131 @@ float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3])
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
 }
+
+
+/**
+* Sample a given texture at the given UV using no filtering
+*/
+__host__ __device__ static
+glm::vec3 sampleTextureSimple(const unsigned char* textureData, int u, int v, int textureWidth, int bytesPerPixel) 
+{
+	const int startPixelIndex = int(u + v * textureWidth) * bytesPerPixel;
+	return glm::vec3(textureData[startPixelIndex], textureData[startPixelIndex + 1], textureData[startPixelIndex + 2]);
+}
+
+/**
+* Sample a given texture at the given UV using bilinear filtering
+*/
+__host__ __device__ static
+glm::vec3 sampleTextureBiLinear(const unsigned char* textureData, int u, int v, const glm::vec2& mixRatio, int textureWidth, int bytesPerPixel) 
+{
+	int sampleIndex = (u +  v * textureWidth) * bytesPerPixel;
+	const glm::vec3 sample1 = glm::vec3(textureData[sampleIndex], textureData[sampleIndex + 1], textureData[sampleIndex + 2]);
+
+	sampleIndex = (u + 1 +  v * textureWidth) * bytesPerPixel;
+	const glm::vec3 sample2 = glm::vec3(textureData[sampleIndex], textureData[sampleIndex + 1], textureData[sampleIndex + 2]);
+
+	sampleIndex = (u +  (v + 1) * textureWidth) * bytesPerPixel;
+	const glm::vec3 sample3 = glm::vec3(textureData[sampleIndex], textureData[sampleIndex + 1], textureData[sampleIndex + 2]);
+
+	sampleIndex = (u + 1 +  (v + 1) * textureWidth) * bytesPerPixel;
+	const glm::vec3 sample4 = glm::vec3(textureData[sampleIndex], textureData[sampleIndex + 1], textureData[sampleIndex + 2]);
+
+	const glm::vec3 mixInX = glm::mix(sample2, sample4, mixRatio.x);
+	const glm::vec3 mixInY = glm::mix(sample1, sample3, mixRatio.x);
+
+	return glm::mix(mixInX, mixInY, mixRatio.y) / 255.f;
+}
+
+
+/**
+* This class is used for timing the performance
+* Uncopyable and unmovable
+*
+* Adapted from WindyDarian(https://github.com/WindyDarian)
+*/
+class PerformanceTimer
+{
+public:
+	PerformanceTimer()
+	{
+		cudaEventCreate(&event_start);
+		cudaEventCreate(&event_end);
+	}
+
+	~PerformanceTimer()
+	{
+		cudaEventDestroy(event_start);
+		cudaEventDestroy(event_end);
+	}
+
+	void startCpuTimer()
+	{
+		if (cpu_timer_started) { throw std::runtime_error("CPU timer already started"); }
+		cpu_timer_started = true;
+
+		time_start_cpu = std::chrono::high_resolution_clock::now();
+	}
+
+	void endCpuTimer()
+	{
+		time_end_cpu = std::chrono::high_resolution_clock::now();
+
+		if (!cpu_timer_started) { throw std::runtime_error("CPU timer not started"); }
+
+		std::chrono::duration<double, std::milli> duro = time_end_cpu - time_start_cpu;
+		prev_elapsed_time_cpu_milliseconds =
+			static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duro.count());
+
+		cpu_timer_started = false;
+	}
+
+	void startGpuTimer()
+	{
+		if (gpu_timer_started) { throw std::runtime_error("GPU timer already started"); }
+		gpu_timer_started = true;
+
+		cudaEventRecord(event_start);
+	}
+
+	void endGpuTimer()
+	{
+		cudaEventRecord(event_end);
+		cudaEventSynchronize(event_end);
+
+		if (!gpu_timer_started) { throw std::runtime_error("GPU timer not started"); }
+
+		cudaEventElapsedTime(&prev_elapsed_time_gpu_milliseconds, event_start, event_end);
+		gpu_timer_started = false;
+	}
+
+	float getCpuElapsedTimeForPreviousOperation() //noexcept //(damn I need VS 2015
+	{
+		return prev_elapsed_time_cpu_milliseconds;
+	}
+
+	float getGpuElapsedTimeForPreviousOperation() //noexcept
+	{
+		return prev_elapsed_time_gpu_milliseconds;
+	}
+
+	// remove copy and move functions
+	PerformanceTimer(const PerformanceTimer&) = delete;
+	PerformanceTimer(PerformanceTimer&&) = delete;
+	PerformanceTimer& operator=(const PerformanceTimer&) = delete;
+	PerformanceTimer& operator=(PerformanceTimer&&) = delete;
+
+private:
+	cudaEvent_t event_start = nullptr;
+	cudaEvent_t event_end = nullptr;
+
+	using time_point_t = std::chrono::high_resolution_clock::time_point;
+	time_point_t time_start_cpu;
+	time_point_t time_end_cpu;
+
+	bool cpu_timer_started = false;
+	bool gpu_timer_started = false;
+
+	float prev_elapsed_time_cpu_milliseconds = 0.f;
+	float prev_elapsed_time_gpu_milliseconds = 0.f;
+};

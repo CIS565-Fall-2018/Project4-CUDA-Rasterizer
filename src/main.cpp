@@ -52,7 +52,6 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-
     frame = 0;
     seconds = time(NULL);
     fpstracker = 0;
@@ -62,8 +61,6 @@ int main(int argc, char **argv) {
         // GLFW main loop
         mainLoop();
     }
-
-	
 
     return 0;
 }
