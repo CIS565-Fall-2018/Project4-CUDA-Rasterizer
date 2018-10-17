@@ -1,18 +1,39 @@
 CUDA Rasterizer
 ===============
 
-[CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
+**University of Pennsylvania, CIS 565: GPU Programming and Architecture**
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
+**Anantha Srinivas**
+[LinkedIn](https://www.linkedin.com/in/anantha-srinivas-00198958/), [Twitter](https://twitter.com/an2tha)
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+**Tested on:**
+* Windows 10, i7-8700 @ 3.20GHz 16GB, GTX 1080 8097MB (Personal)
+* Built for Visual Studio 2017 using the v140 toolkit
 
-### (TODO: Your README)
+# Introduction
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+# Features
+
+The current version of the rasterizer supprots the following feartures:
+
+* Vertex Shading and primitive assembly
+
+* Depth testing
+
+* Shaders - Lamberts and Blinn Phong
+
+* Instancing
+
+* Texture Mapping (2D) with bilinear filtering
+
+* SuperSample Antialiasing
+
+# General Performance Analysis
+
+
+# Build Command
+
+`cmake .. -G "Visual Studio 15 2017 Win64" -DCUDA_TOOLKIT_ROOT_DIR="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v9.2" -T v140,cuda=9.2`
 
 
 ### Credits

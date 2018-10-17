@@ -31,7 +31,7 @@ namespace {
 
 #define BYTES_PER_PIXEL 3
 
-#define NUM_INSTANCES 1
+#define NUM_INSTANCES 9
 
 #define AA_SUPER_SAMPLE
 //#define AA_MULTI_SAMPLE
@@ -690,11 +690,17 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 		const glm::vec4 screenPos = NDCToScreenSpace(&outPos, width, height);
 
 		// TODO : Change this
-		const glm::vec4 instanceOffset(100.f, 0.f, 0.f, 0.f);
+		const float instanceOffset = 100.f;
+
+		const int gridSize = 3;// glm::sqrt(numInstances);
+
 		for (int instanceId = 0; instanceId < numInstances; ++instanceId)
 		{
+			const float offsetX = (instanceId % gridSize) * instanceOffset;
+			const float offsetY = (instanceId / gridSize) * instanceOffset;
+
 			// Output of vertex shader
-			primitive.dev_verticesOut[vid * numInstances + instanceId].pos = screenPos + instanceOffset * float(instanceId);
+			primitive.dev_verticesOut[vid * numInstances + instanceId].pos = screenPos + glm::vec4(offsetX, offsetY, 0.f, 0.f);// instanceOffset * float(instanceId);
 			primitive.dev_verticesOut[vid * numInstances + instanceId].eyePos = glm::vec3(MV * glm::vec4(inPos, 1.f));
 			primitive.dev_verticesOut[vid * numInstances + instanceId].eyeNor = MV_normal * inNormal;
 
@@ -706,7 +712,6 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 			{
 				primitive.dev_verticesOut[vid * numInstances + instanceId].color = glm::clamp(glm::vec3(outPos), glm::vec3(0.f), glm::vec3(1.f));
 			}
-			
 		}
 	}
 }
