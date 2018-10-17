@@ -12,18 +12,18 @@ CUDA Rasterizer
 
 # Introduction
 
+![](renders/pipeline.png) 
+
+
 # Features
 
 The current version of the rasterizer supprots the following features:
 
 * Vertex Shading and primitive assembly with depth testing
 
-| Color             |  Normals |  Depth |
-:-------------------------:|:-------------------------:|:-------------------------: |:-------------------------:
+| Color  | Normal | Depth |
+| ------------- | ------------- |  ------------- |
 |![](renders/color.PNG)  |  ![](renders/normals.PNG) |  ![](renders/depth.PNG)
-
-
-* Shaders - Lamberts and Blinn Phong
 
 * Instancing
 
@@ -36,9 +36,19 @@ The current version of the rasterizer supprots the following features:
 
 * SuperSample Antialiasing
 
-| No SSAA             |  SSAA 2 |
-:-------------------------:|:-------------------------:|:-------------------------:
+| No SSAA |  SSAA 2 |
+| ------------- | ------------- |
 |![](renders/ssaa_1.PNG)  |  ![](renders/ssaa_2.PNG) | 
+
+* Color interpolation between points on a primitive
+
+![](renders/render_di.PNG)
+
+* Points and Lines
+
+| Triangles  | Lines | Points |
+| ------------- | ------------- |  ------------- |
+| ![](renders/triangles.PNG)  | ![](renders/lines.PNG)  |![](renders/points.PNG)
 
 # General Performance Analysis
 

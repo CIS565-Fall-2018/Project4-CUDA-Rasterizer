@@ -99,7 +99,7 @@ bool isBarycentricCoordInBounds(const glm::vec3 barycentricCoord) {
            barycentricCoord.z >= 0.0 && barycentricCoord.z <= 1.0;
 }
 
-#define POINT_TOLERANCE 5.f
+#define POINT_TOLERANCE 2.5f
 #define LINE_TOLERANCE 0.02f
 
 #define IS_SAME(a,b) abs(a - b) < POINT_TOLERANCE
