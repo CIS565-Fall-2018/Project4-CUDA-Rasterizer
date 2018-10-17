@@ -99,3 +99,21 @@ float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3])
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
 }
+
+/**
+ * For a given barycentric coordinate, compute the corresponding z position
+ * (i.e. depth) on the triangle with perspective projection
+ */
+
+__host__ __device__ static
+float computeOneOverZ(const glm::vec3 barycentricCoord, const glm::vec3 tri[3]){
+    return 1.0f / (barycentricCoord.x / tri[0].z + barycentricCoord.y / tri[1].z + barycentricCoord.z / tri[2].z);
+}
+
+__host__ __device__ static
+glm::vec3 correctCoordPerspective(const float z, glm::vec3 barycentricCoord, const glm::vec3 tri[3], const glm::vec3 coord[3]){
+    return z * glm::vec3(coord[0] * barycentricCoord.x / tri[0].z +
+                                coord[1] * barycentricCoord.y / tri[1].z +
+                                coord[2] * barycentricCoord.z / tri[2].z);
+}
+
