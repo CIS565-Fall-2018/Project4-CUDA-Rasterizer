@@ -1,19 +1,56 @@
 CUDA Rasterizer
 ===============
 
-[CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
-
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Xiao Zhang
+  * [LinkedIn](https://www.linkedin.com/in/xiao-zhang-674bb8148/)
+* Tested on: Windows 10, i7-7700K @ 4.20GHz 16.0GB, GTX 1080 15.96GB (my own PC)
 
-### (TODO: Your README)
+Analysis 
+======================
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+![](img/box_far.JPG)
 
+![](img/box_mid.JPG)
+
+![](img/box_near.JPG)
+
+![](img/checkerboard_far.JPG)
+
+![](img/checkerboard_mid.JPG)
+
+![](img/checkerboard_near.JPG)
+
+![](img/flower_far.JPG)
+
+![](img/flower_mid.JPG)
+
+![](img/flower_near.JPG)
+
+![](img/duck_far_0.JPG)
+
+![](img/duck_far_1.JPG)
+
+![](img/duck_mid_0.JPG)
+
+![](img/duck_mid_1.JPG)
+
+![](img/duck_near_0.JPG)
+
+![](img/duck_near_1.JPG)
+
+![](img/cow_far_0.JPG)
+
+![](img/cow_far_1.JPG)
+
+![](img/cow_mid_0.JPG)
+
+![](img/cow_mid_1.JPG)
+
+![](img/cow_near_0.JPG)
+
+![](img/cow_near_1.JPG)
 
 ### Credits
 

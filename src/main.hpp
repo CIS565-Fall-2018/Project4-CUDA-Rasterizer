@@ -25,7 +25,10 @@
 
 #include "rasterize.h"
 
+#define MODE_MAX 2
+
 using namespace std;
+
 
 //-------------------------------
 //------------GL STUFF-----------
@@ -33,6 +36,14 @@ using namespace std;
 int frame;
 int fpstracker;
 double seconds;
+
+double recordStart;
+double recordEnd;
+double recordFrame;
+double recordFrameFinal[MODE_MAX];
+bool record;
+int mode;
+
 int fps = 0;
 GLuint positionLocation = 0;
 GLuint texcoordsLocation = 1;
@@ -61,6 +72,7 @@ int main(int argc, char **argv);
 //-------------------------------
 
 void runCuda();
+void setLightDirDev(const glm::vec3 &_lightDir);//me
 
 #ifdef __APPLE__
 void display();

@@ -20,9 +20,10 @@
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        cout << "Usage: [gltf file]. Press Enter to exit" << endl;
-		getchar();
-        return 0;
+        //cout << "Usage: [gltf file]. Press Enter to exit" << endl;
+		//getchar();
+        //return 0;
+		argv[1] = "../gltfs/cow/cow.gltf";//"../gltfs/box/box.gltf";//default gltf, relative to lauching directory which is ".....\build\"//
     }
 
 	tinygltf::Scene scene;
@@ -52,6 +53,10 @@ int main(int argc, char **argv) {
 
     frame = 0;
     seconds = time(NULL);
+	recordStart = time(NULL);
+	record = false;
+	recordFrame = 0;
+	mode = 0;
     fpstracker = 0;
 
     // Launch CUDA/GL
@@ -63,12 +68,28 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+glm::vec3 lightDir(0, 0, -1);
+float x_light_rot = 0.0f, y_light_rot = 0.0f, z_light_rot = 0.0f;
+
 void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+
+		setLightDirDev(lightDir);//me
         runCuda();
 
         time_t seconds2 = time (NULL);
+		
+		//record after press
+		if (record) {
+			recordEnd = time(NULL);
+			if (recordEnd - recordStart >= 10)
+			{
+				recordFrame /= (recordEnd - recordStart);
+				record = false;
+			}
+			recordFrameFinal[mode] = recordFrame;
+		}
 
         if (seconds2 - seconds >= 1) {
 
@@ -77,7 +98,10 @@ void mainLoop() {
             seconds = seconds2;
         }
 
-        string title = "CIS565 Rasterizer | " + utilityCore::convertIntToString((int)fps) + " FPS";
+        string title = "m" + utilityCore::convertIntToString(mode) + " | m0 " + 
+			utilityCore::convertIntToString((int)recordFrameFinal[0]) + " FPS m1 " + 
+			utilityCore::convertIntToString((int)recordFrameFinal[1]) + " FPS | CIS565 Rasterizer | " + 
+			utilityCore::convertIntToString((int)fps) + " FPS";
         glfwSetWindowTitle(window, title.c_str());
 
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -99,6 +123,7 @@ void mainLoop() {
 float scale = 1.0f;
 float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
 float x_angle = 0.0f, y_angle = 0.0f;
+
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
@@ -108,23 +133,35 @@ void runCuda() {
 		scale * ((float)width / (float)height),
 		-scale, scale, 1.0, 1000.0);
 
+	//cout << "start" << endl;
+	//for (int i = 0; i < 4; i++)
+	//{
+	//	for (int j = 0; j < 4; j++)
+	//	{
+	//		cout << P[i][j] << " ";
+	//	}
+	//	cout << endl;
+	//}
+
 	glm::mat4 V = glm::mat4(1.0f);
 
 	glm::mat4 M =
 		glm::translate(glm::vec3(x_trans, y_trans, z_trans))
 		* glm::rotate(x_angle, glm::vec3(1.0f, 0.0f, 0.0f))
-		* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f));
+		* glm::rotate(y_angle, glm::vec3(0.0f, 1.0f, 0.0f))
+		* glm::scale(glm::vec3(3,3,3));
 
 	glm::mat3 MV_normal = glm::transpose(glm::inverse(glm::mat3(V) * glm::mat3(M)));
 	glm::mat4 MV = V * M;
 	glm::mat4 MVP = P * MV;
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal);
+	rasterize(dptr, MVP, MV, MV_normal, mode);
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
     fpstracker++;
+	if(record) recordFrame++;
 }
 
 //-------------------------------
@@ -238,10 +275,15 @@ void initVAO(void) {
     };
 
     GLfloat texcoords[] = {
-        1.0f, 1.0f,
-        0.0f, 1.0f,
-        0.0f, 0.0f,
-        1.0f, 0.0f
+        //1.0f, 1.0f,
+        //0.0f, 1.0f,
+        //0.0f, 0.0f,
+        //1.0f, 0.0f
+		// YOU NAUGHTY LITTLE BOY !!! This is counter-intuitive !!! You should change this only in CUDA code !!!
+		0.0f, 0.0f,
+		1.0f, 0.0f,
+		1.0f, 1.0f,
+		0.0f, 1.0f
     };
 
     GLushort indices[] = { 0, 1, 3, 3, 1, 2 };
@@ -328,6 +370,34 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
     }
+	//me
+	if (key == GLFW_KEY_X && action == GLFW_PRESS) {
+		x_light_rot += 0.01f;
+		lightDir = glm::normalize(glm::mat3(glm::rotate(x_light_rot, glm::vec3(1, 0, 0))) * lightDir);
+		printf("lightDir:%f,%f,%f\n", lightDir.x, lightDir.y, lightDir.z);
+	}
+	if (key == GLFW_KEY_Y && action == GLFW_PRESS) {
+		y_light_rot += 0.01f;
+		lightDir = glm::normalize(glm::mat3(glm::rotate(y_light_rot, glm::vec3(0, 1, 0))) * lightDir);
+		printf("lightDir:%f,%f,%f\n", lightDir.x, lightDir.y, lightDir.z);
+	}
+	if (key == GLFW_KEY_Z && action == GLFW_PRESS) {
+		z_light_rot += 0.01f;
+		lightDir = glm::normalize(glm::mat3(glm::rotate(z_light_rot, glm::vec3(0, 0, 1))) * lightDir);
+		printf("lightDir:%f,%f,%f\n", lightDir.x, lightDir.y, lightDir.z);
+	}
+	if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+		record = !record;
+		if (record)
+		{
+			recordStart = time(NULL);
+			recordFrame = 0;
+			recordFrameFinal[mode] = 0;
+		}
+	}
+	if (key == GLFW_KEY_M && action == GLFW_PRESS) {
+		mode = (mode + 1) % MODE_MAX;
+	}
 }
 
 //----------------------------
@@ -395,6 +465,6 @@ void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 
 void mouseWheelCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
-	const double s = 1.0;	// sensitivity
+	const double s = 0.1;	// sensitivity
 	z_trans += (float)(s * yoffset);
 }
