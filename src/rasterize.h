@@ -12,11 +12,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
 
+#define TIMER 1
 #define TEXTURE 1
 #define PERSPECTIVE 1
 #define BILINEAR 1
 // PRIMTYPE: 1 = Point, 2 = Line, 3 = Triangle
-#define PRIMTYPE 2 
+#define PRIMTYPE 1
 
 namespace tinygltf{
 	class Scene;

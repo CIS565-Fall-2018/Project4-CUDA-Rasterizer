@@ -5,17 +5,46 @@ CUDA Rasterizer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
-
-### (TODO: Your README)
-
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+* Eric Chiu
+* Tested on: Windows 10 Education, Intel(R) Xeon(R) CPU E5-1630 v4 @ 3.60GHz 32GB, NVIDIA GeForce GTX 1070 (SIGLAB)
 
 
-### Credits
+![](./renders/truck-texture.png)
 
-* [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
-* [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
+
+## Description
+
+This project implements a rasterized graphics pipeline using CUDA programming and GPU hardware. Features include lambertian shading, UV texture mapping, and point and line rasterization.
+
+## Analysis
+
+
+![](./renders/duck-chart.png)
+
+![](./renders/truck-chart.png)
+
+
+## UV Texture Mapping
+
+
+![](./renders/checkerboard-no-perspective-no-bilinear.png)
+
+![](./renders/checkerboard-no-bilinear.png)
+
+![](./renders/checkerboard.png)
+
+
+## Point and Line Rasterization
+
+
+![](./renders/duck-point.png)
+
+![](./renders/truck-point.png)
+
+![](./renders/duck-line.png)
+
+![](./renders/truck-line.png)
+
+![](./renders/duck-texture.png)
+
+![](./renders/truck-texture.png)

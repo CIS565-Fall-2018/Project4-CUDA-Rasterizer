@@ -17,6 +17,7 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 namespace {
 
@@ -183,15 +184,15 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer)
 		// TODO: add your fragment shader code here
         Fragment fragment = fragmentBuffer[index];
  
-        #if TEXTURE
+        #if TEXTURE == 1
             if (fragment.dev_diffuseTex != NULL) 
             {
-                #if BILINEAR
+                #if BILINEAR == 1
                     fragment.color = getBilinearFilteredPixelColor(fragment);
                 #else
                     int u = fragment.texcoord0.x * fragment.texWidth;
                     int v = fragment.texcoord0.y * fragment.texHeight;
-                    fragment.color = getColor(fragment.dev_diffuseTex, fragment.texWidth, u, v);
+                    fragment.color = getTexColor(fragment.dev_diffuseTex, fragment.texWidth, u, v);
                 #endif
             }
         #endif
@@ -840,13 +841,13 @@ void _rasterizeTriangles(Fragment* dev_fragmentBuffer, Primitive& primitive, int
                                                      + barycentricCoord.z * (v2.texcoord0 / v2.eyePos.z));
                     // no perspective correct
                     #else
-                        fragment.texcoord0 = barycentric.x * v0.texcoord0 + barycentric.y * v1.texcoord0 + barycentric.z * v2.texcoord0;
+                        fragment.texcoord0 = barycentricCoord.x * v0.texcoord0 + barycentricCoord.y * v1.texcoord0 + barycentricCoord.z * v2.texcoord0;
                     #endif
                 // do not use texture color
                 #else
                     fragment.dev_diffuseTex = NULL;
                     // default use vertex normal as color
-                    fragment.color = fragment.eyeNor
+                    fragment.color = fragment.eyeNor;
                 #endif
 
                 const int fragIndex = x + (y * width);
@@ -899,7 +900,8 @@ void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
 /**
  * Perform rasterization.
  */
-void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) {
+void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) 
+{
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -916,7 +918,13 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
 
-		for (; it != itEnd; ++it) {
+        #if TIMER
+            using time_point_t = std::chrono::high_resolution_clock::time_point;
+            time_point_t start_time = std::chrono::high_resolution_clock::now();
+        #endif
+
+		for (; it != itEnd; ++it) 
+        {
 			auto p = (it->second).begin();	// each primitive
 			auto pEnd = (it->second).end();
 			for (; p != pEnd; ++p) {
@@ -936,21 +944,57 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				curPrimitiveBeginId += p->numPrimitives;
 			}
 		}
-
 		checkCUDAError("Vertex Processing and Primitive Assembly");
+
+        #if TIMER
+            cudaDeviceSynchronize();
+            time_point_t end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> dur = end_time - start_time;
+            float elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+            std::cout << std::endl;
+            std::cout << "Vertex Processing and Primitive Assembly: " << elapsed_time << " milliseconds." << std::endl;
+        #endif
+
 	}
-	
+
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
+
+    #if TIMER
+        using time_point_t = std::chrono::high_resolution_clock::time_point;
+        time_point_t start_time = std::chrono::high_resolution_clock::now();
+    #endif
+
 	// TODO: rasterize
     dim3 numThreadsPerBlock(128);
     dim3 numBlocksForPrimitives = (totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x;
     _rasterize << <numBlocksForPrimitives, numThreadsPerBlock >> > (totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex, width, height);
 
+    #if TIMER
+        cudaDeviceSynchronize();
+        time_point_t end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> dur = end_time - start_time;
+        float elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+        std::cout << "Rasterization: " << elapsed_time << " milliseconds." << std::endl;
+    #endif
+
+    #if TIMER
+        start_time = std::chrono::high_resolution_clock::now();
+    #endif
+
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
+
+    #if TIMER
+        cudaDeviceSynchronize();
+        end_time = std::chrono::high_resolution_clock::now();
+        dur = end_time - start_time;
+        elapsed_time = static_cast<decltype(elapsed_time)>(dur.count());
+        std::cout << "Fragment Shader: " << elapsed_time << " milliseconds." << std::endl;
+    #endif
+
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
     sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
