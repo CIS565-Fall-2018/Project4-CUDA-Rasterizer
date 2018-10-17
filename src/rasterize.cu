@@ -20,6 +20,8 @@
 #include <device_launch_parameters.h>
 
 #define SSAA 0
+#define BILINEAR_TEXTURE 0
+#define PERSPECTIVE 0
 
 namespace {
 
@@ -175,13 +177,39 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 		glm::vec3 light_dir = glm::normalize(light_pos - fragment_Buffer.eyePos);
 		if (fragment_Buffer.dev_diffuseTex != NULL) {
 			TextureData *texture_data = fragment_Buffer.dev_diffuseTex;
+#if	BILINEAR_TEXTURE
+			float u = fragment_Buffer.texcoord0.x * fragment_width;
+			float v = fragment_Buffer.texcoord0.y * fragment_height;
+			int x = (int)u;
+			int y = (int)v;
+			float u_ratio = u - x;
+			float v_ratio = v - y;
+			float u_opposite = 1.f - u_ratio;
+			float v_opposite = 1.f - v_ratio;
+
+			int pos0 = x + y*fragment_width;
+			int pos1 = (x + 1) + y*fragment_width;
+			int pos2 = x + (y + 1)*fragment_width;
+			int pos3 = (x + 1) + (y + 1)*fragment_width;
+
+			float result1 = v_opposite * (texture_data[3 * pos0] * u_opposite + texture_data[3 * pos1] * u_ratio)
+				+ v_ratio * (texture_data[3 * pos2] * u_opposite + texture_data[3 * pos3] * u_ratio);
+
+			float result2 = v_opposite * (texture_data[3 * pos0 + 1] * u_opposite + texture_data[3 * pos1 + 1] * u_ratio)
+				+ v_ratio * (texture_data[3 * pos2 + 1] * u_opposite + texture_data[3 * pos3 + 1] * u_ratio);
+
+			float result3 = v_opposite * (texture_data[3 * pos0 + 2] * u_opposite + texture_data[3 * pos1 + 2] * u_ratio)
+				+ v_ratio * (texture_data[3 * pos2 + 2] * u_opposite + texture_data[3 * pos3 + 2] * u_ratio);
+
+			diffuse = glm::vec3(result1, result2, result3) / 255.f;
+#else
 			int x1 = fragment_Buffer.texcoord0.x * fragment_width;
 			int y1 = fragment_Buffer.texcoord0.y * fragment_height;
 			int index1 = x1 + y1*fragment_width;
 			diffuse = glm::vec3(texture_data[3 * index1] / 255.f,
 				texture_data[3 * index1 + 1] / 255.f,
 				texture_data[3 * index1 + 2] / 255.f);
-
+#endif
 		}
 		else {
 			diffuse = fragment_Buffer.color;
@@ -767,24 +795,56 @@ __global__ void rasterization(int num, Primitive *primitives, Fragment *fragment
 				if (isBarycentricCoordInBounds(bary_centric)) {
 					int index = x + y * width;
 					float depth = getZAtCoordinate(bary_centric, triangle_vertices);
-					int depth1 = INT_MIN * depth;
+					int depth1 = INT_MAX * depth;
 					atomicMin(&depths[index], depth1);
 					if (depth1 == depths[index]) {
-						fragments[index].depth = fabs(getZAtCoordinate(bary_centric, triangle_vertices));
+						fragments[index].depth = fabs(depth);
 						fragments[index].eyeNor = bary_centric.x * primitive.v[0].eyeNor +
 							bary_centric.y * primitive.v[1].eyeNor +
 							bary_centric.z * primitive.v[2].eyeNor;
 						fragments[index].eyePos = bary_centric.x * primitive.v[0].eyePos +
 							bary_centric.y * primitive.v[1].eyePos +
 							bary_centric.z * primitive.v[2].eyePos;
+#if PERSPECTIVE
+						glm::vec2 a = bary_centric.x * primitive.v[0].texcoord0 / primitive.v[0].eyePos.z
+							+ bary_centric.y * primitive.v[1].texcoord0 / primitive.v[1].eyePos.z
+							+ bary_centric.z * primitive.v[2].texcoord0 / primitive.v[2].eyePos.z;
+
+						float b = bary_centric.x / primitive.v[0].eyePos.z
+							+ bary_centric.y / primitive.v[1].eyePos.z
+							+ bary_centric.z / primitive.v[2].eyePos.z;
+
+						fragments[index].texcoord0 = a / b;
+
+
+						/*glm::vec3 w = {
+							bary_centric.x / eye_pos[0].z,
+							bary_centric.y / eye_pos[1].z,
+							bary_centric.z / eye_pos[2].z,
+							};
+						float a = w.x * primitive.v[0].texcoord0.x +
+							w.y * primitive.v[1].texcoord0.x +
+							w.z * primitive.v[2].texcoord0.x;
+
+						float b = w.x * primitive.v[0].texcoord0.y +
+							w.y * primitive.v[1].texcoord0.y +
+							w.z * primitive.v[2].texcoord0.y;
+
+						float c = 1.f / (w.x + w.y + w.z);
+
+						a *= c;
+						b *= c;
+						fragments[index].texcoord0 = glm::vec2(a, b);*/
+#else
 						fragments[index].texcoord0 = bary_centric.x * primitive.v[0].texcoord0 +
 							bary_centric.y * primitive.v[1].texcoord0 +
 							bary_centric.z * primitive.v[2].texcoord0;
+#endif
+						fragments[index].dev_diffuseTex = primitive.v[0].dev_diffuseTex;
+						fragments[index].height = primitive.v[0].texHeight;
+						fragments[index].width = primitive.v[0].texWidth;
+						fragments[index].color = glm::vec3(1.f, 1.f, 1.f);
 					}
-					fragments[index].dev_diffuseTex = primitive.v[0].dev_diffuseTex;
-					fragments[index].height = primitive.v[0].texHeight;
-					fragments[index].width = primitive.v[0].texWidth;
-					fragments[index].color = glm::vec3(1.f, 1.f, 1.f);
 				}
 			}
 		}
