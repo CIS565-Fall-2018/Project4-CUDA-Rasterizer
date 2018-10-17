@@ -31,9 +31,10 @@ namespace {
 #define NUM_INSTANCES 1
 
 #define AA_SUPER_SAMPLE
-#define AA_MULTI_SAMPLE
+//#define AA_MULTI_SAMPLE
 
 #define SSAA_LEVEL 1
+#define MSAA_LEVEL 2
 
 	enum PrimitiveType
 	{
@@ -110,15 +111,23 @@ namespace {
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
-static int downScaledWidth = 0;
-static int downScaledHeight = 0;
+static int ssaaWidth = 0;
+static int ssaaHeight = 0;
+
+static int msaaWidth = 0;
+static int msaaHeight = 0;
 
 static int width = 0;
 static int height = 0;
 
+static int originalWidth = 0;
+static int originalHeight = 0;
+
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
+
 static Fragment *dev_fragmentBuffer = NULL;
+
 static glm::vec3 *dev_framebuffer = NULL;
 static glm::vec3 *dev_AAFrameBuffer = NULL;
 
@@ -154,11 +163,24 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
  */
 void rasterizeInit(int w, int h) 
 {
-	downScaledWidth = w;
-	downScaledHeight = h;
+	originalWidth = w;
+	originalHeight = h;
 
-    width = w * SSAA_LEVEL;
-    height = h * SSAA_LEVEL;
+	ssaaWidth = w * SSAA_LEVEL;
+	ssaaHeight = h * SSAA_LEVEL;
+
+	msaaWidth = w * MSAA_LEVEL;
+	msaaHeight = h * MSAA_LEVEL;
+
+#ifdef AA_SUPER_SAMPLE
+	width = ssaaWidth;
+	height = ssaaHeight;
+#endif // AA_SUPER_SAMPLE
+
+#ifdef AA_MULTI_SAMPLE
+	width = msaaWidth;
+	height = msaaHeight;
+#endif // AA_MULTI_SAMPLE
 
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
@@ -169,8 +191,8 @@ void rasterizeInit(int w, int h)
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
 
 	cudaFree(dev_AAFrameBuffer);
-	cudaMalloc(&dev_AAFrameBuffer,   downScaledWidth * downScaledHeight * sizeof(glm::vec3));
-	cudaMemset(dev_AAFrameBuffer, 0, downScaledWidth * downScaledHeight * sizeof(glm::vec3));
+	cudaMalloc(&dev_AAFrameBuffer,   originalWidth * originalHeight * sizeof(glm::vec3));
+	cudaMemset(dev_AAFrameBuffer, 0, originalWidth * originalHeight * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(float));
@@ -651,7 +673,6 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 		const glm::vec3 inPos = primitive.dev_position[vid];
 		const glm::vec3 inNormal = primitive.dev_normal[vid];
 		
-
 		// This is in NDC Space
 		glm::vec4 outPos = MVP * glm::vec4(inPos, 1.f);
 		outPos /= outPos.w;
@@ -914,8 +935,13 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
 		(height - 1) / blockSize2d.y + 1);
 
-	dim3 blockAACount2d((downScaledWidth  - 1) / blockSize2d.x + 1,
-		(downScaledHeight - 1) / blockSize2d.y + 1);
+	dim3 blockAACount2d((originalWidth  - 1) / blockSize2d.x + 1,
+		(originalHeight - 1) / blockSize2d.y + 1);
+
+
+	dim3 numThreadsPerBlock(128);
+	dim3 blocksPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+
 
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
@@ -923,7 +949,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	// Vertex Process & primitive assembly
 	{
 		curPrimitiveBeginId = 0;
-		dim3 numThreadsPerBlock(128);
+		
 
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
@@ -965,7 +991,11 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// 4. Rasterize - Call per primitive
+#ifdef AA_MULTI_SAMPLE
 	_rasterizePrimitive << <blockCount2d, blockSize2d >> > (width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex);
+#else
+	_rasterizePrimitive << <blocksPrimitives, numThreadsPerBlock >> > (width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex);
+#endif
 	checkCUDAError("Rasterizer");
 
     // Copy fragmentBuffer colors into framebuffer
@@ -973,11 +1003,11 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	checkCUDAError("fragment shader");
 
 	// perform SSAA
-	_SSAA <<< blockAACount2d, blockSize2d >>> (downScaledWidth, downScaledHeight, width, height, dev_framebuffer, dev_AAFrameBuffer);
+	_SSAA <<< blockAACount2d, blockSize2d >>> (originalWidth, originalHeight, width, height, dev_framebuffer, dev_AAFrameBuffer);
 	checkCUDAError("SSAA");
 
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockAACount2d, blockSize2d>>>(pbo, downScaledWidth, downScaledHeight, dev_AAFrameBuffer);
+    sendImageToPBO<<<blockAACount2d, blockSize2d>>>(pbo, originalWidth, originalHeight, dev_AAFrameBuffer);
     checkCUDAError("copy render result to pbo");
 }
 
