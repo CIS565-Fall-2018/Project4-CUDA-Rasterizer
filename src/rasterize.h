@@ -22,5 +22,5 @@ void rasterizeInit(int width, int height);
 void rasterizeSetBuffers(const tinygltf::Scene & scene);
 
 void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal,
-	int renderMode, glm::mat4 autoRotateMat4);
+	int renderMode, glm::mat4 autoRotateMat4, bool bloomEffect);
 void rasterizeFree();

@@ -106,6 +106,8 @@ float x_angle = 0.0f, y_angle = 0.0f;
 
 //render mode toggle
 int renderMode = RenderMode::Triangle;
+// enable blomm effect
+bool bloomEffect = true;
 
 //for auto rotation
 float autoRotateAngle = 0.0f;
@@ -145,7 +147,7 @@ void runCuda() {
 	glm::mat4 autoRotateMat = glm::rotate(autoRotateAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal, renderMode, autoRotateMat);
+	rasterize(dptr, MVP, MV, MV_normal, renderMode, autoRotateMat, bloomEffect);
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
@@ -366,6 +368,9 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
 			break;
 		case GLFW_KEY_3:
 			renderMode = RenderMode::Points;
+			break;
+		case GLFW_KEY_B:
+			bloomEffect = !bloomEffect;
 			break;
 		}
 		

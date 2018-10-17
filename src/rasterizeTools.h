@@ -120,7 +120,7 @@ bool isPosInTriangle(glm::vec3 p, glm::vec3 pos1, glm::vec3 pos2, glm::vec3 pos3
 	float area3 = 0.5f * glm::length(glm::cross(v - v1, v2 - v1));
 
 	//check the sum of three (signed) areas against the whole area
-	return glm::abs(area1 + area2 + area3 - area) < 0.1f;
+	return glm::abs(area1 + area2 + area3 - area) < 0.001f;
 }
 
 /**

@@ -23,6 +23,7 @@
 #define TEXTURE_BILINEAR 0
 #define DEBUG_NORM 0
 #define DEBUG_Z 0
+#define DOWNSCALERATIO 3
 
 namespace {
 
@@ -127,21 +128,47 @@ static glm::vec3 *dev_framebuffer = NULL;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
 
+//used for atomic depth writing
 static int * dev_mutex = NULL;
+//used for bloom effect post processing
+static glm::vec3 * dev_framebufferAux = NULL;
+static glm::vec3 * dev_framebufferDownScaled = NULL;
+static glm::vec3 * dev_framebufferDownScaledAux = NULL;
+
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
  */
 __global__ 
-void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
+void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image,
+	//used for bloomEffect
+	int framebufferEdgeOffset,
+	int downScaleW,
+	int downScaleRatio
+)
+{
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
     if (x < w && y < h) {
+		//frame buffer id
+		int fid; 
+		if (downScaleRatio == 1)
+		{
+			fid = x + (y * w);
+		}
+		else
+		{
+			fid = (x / downScaleRatio) + framebufferEdgeOffset
+				+ ((y / downScaleRatio) + framebufferEdgeOffset) * (downScaleW + 2 * framebufferEdgeOffset);
+		}
         glm::vec3 color;
-        color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-        color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-        color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+        //color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
+        //color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
+        //color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+		color.x = glm::clamp(image[fid].x, 0.0f, 1.0f) * 255.0;
+		color.y = glm::clamp(image[fid].y, 0.0f, 1.0f) * 255.0;
+		color.z = glm::clamp(image[fid].z, 0.0f, 1.0f) * 255.0;
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
         pbo[index].x = color.x;
@@ -190,14 +217,16 @@ __device__ glm::vec3 sampleFromTextureBilinear(TextureData* dev_diffuseTex, glm:
 __global__
 void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, 
 	glm::vec3 lightPos, //for lighting calc
-	int renderMode //switch rendermode
+	int renderMode, //switch rendermode
+	int framebufferEdgeOffset //bloom Effect
 	)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-    int index = x + (y * w);
 
 	if (x < w && y < h) {
+		int index = x + (y * w);
+
 		//framebuffer[index] = fragmentBuffer[index].color;
 
 		////// TODO: add your fragment shader code here
@@ -222,7 +251,9 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer,
 #if !DEBUG_Z && !DEBUG_NORM
 			glm::vec3 lightDir = glm::normalize(lightPos - f.eyePos);
 			float lambert = glm::dot(lightDir, f.eyeNor);
-			lambert += 0.15f; // ambient light
+			float ambient = 0.1f;
+			float light_exp = 3.0f;
+			lambert = lambert * light_exp + ambient;
 			framebuffer[index] = f.color * lambert;
 #else
 			framebuffer[index] = f.color;
@@ -236,6 +267,200 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer,
 	}
 }
 
+// bloom effect : horizontal Gaussian blur
+__global__
+void gaussianBlurHorizon(int w, int h, glm::vec3 * framebufferIn,
+	glm::vec3 * framebufferOut, int framebufferEdgeOffset)
+{
+	//using shared memory to store shared frame buffer
+	__shared__ glm::vec3 framebufferIn_shared[144]; //144 = 8 * (5 + 8 + 5)
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if (x < w && y < h)
+	{
+		//framebuffer index
+		int fid = (x + framebufferEdgeOffset) + ((y + framebufferEdgeOffset) * (w + 2 * framebufferEdgeOffset));
+		framebufferOut[fid] = glm::vec3(0.0f);
+		//read framebufferIn into shared memory
+		//18 = 5 * 2 + 8
+		int index = threadIdx.y * 18 + threadIdx.x + 5;
+		if (threadIdx.x == 0)
+		{
+			framebufferIn_shared[index - 5] = framebufferIn[fid - 5];
+			framebufferIn_shared[index - 4] = framebufferIn[fid - 4];
+			framebufferIn_shared[index - 3] = framebufferIn[fid - 3];
+			framebufferIn_shared[index - 2] = framebufferIn[fid - 2];
+			framebufferIn_shared[index - 1] = framebufferIn[fid - 1];
+		}
+		if (threadIdx.x == blockDim.x - 1)
+		{
+			framebufferIn_shared[index + 5] = framebufferIn[fid + 5];
+			framebufferIn_shared[index + 4] = framebufferIn[fid + 4];
+			framebufferIn_shared[index + 3] = framebufferIn[fid + 3];
+			framebufferIn_shared[index + 2] = framebufferIn[fid + 2];
+			framebufferIn_shared[index + 1] = framebufferIn[fid + 1];
+		}
+		framebufferIn_shared[index] = framebufferIn[fid];
+
+		__syncthreads();
+
+		//apply horizontal gaussian blur and write to output
+		framebufferOut[fid] += framebufferIn_shared[index - 5] * 0.0093f;
+		framebufferOut[fid] += framebufferIn_shared[index - 5] * 0.0093f;
+		framebufferOut[fid] += framebufferIn_shared[index - 4] * 0.028002f;
+		framebufferOut[fid] += framebufferIn_shared[index - 3] * 0.065984f;
+		framebufferOut[fid] += framebufferIn_shared[index - 2] * 0.121703f;
+		framebufferOut[fid] += framebufferIn_shared[index - 1] * 0.175713f;
+		framebufferOut[fid] += framebufferIn_shared[index] * 0.198596f;
+		framebufferOut[fid] += framebufferIn_shared[index + 1] * 0.175713f;
+		framebufferOut[fid] += framebufferIn_shared[index + 2] * 0.121703f;
+		framebufferOut[fid] += framebufferIn_shared[index + 3] * 0.065984f;
+		framebufferOut[fid] += framebufferIn_shared[index + 4] * 0.028002f;
+		framebufferOut[fid] += framebufferIn_shared[index + 5] * 0.0093f;
+	}
+}
+
+//bloom effect : vertical gussian blur
+__global__
+void gaussianBlurVert(int w, int h, glm::vec3 * framebufferIn,
+	glm::vec3 * framebufferOut, int framebufferEdgeOffset)
+{
+	//Same as horizontal
+
+    //array size should be blocksize.x * (framebufferEdgeOffset + blocksize.y + framebufferEdgeOffset)
+    // 8 * (5 + 8 + 5) -> 144
+	__shared__ glm::vec3 framebuffer_in_shared[144];
+
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if (x < w && y < h) {
+		//framebuffer index
+		int fid = (x + framebufferEdgeOffset) + ((y + framebufferEdgeOffset) * (w + 2 * framebufferEdgeOffset));
+		framebufferOut[fid] = glm::vec3(0.f);
+
+		int numOfelementsOneRow = w + 2 * framebufferEdgeOffset;
+
+		// blocksize.x
+		// 8
+		int index = (threadIdx.y + 5) * 8 + threadIdx.x;
+		//write into shared memory
+		if (threadIdx.y == 0) {
+			// 40, 32, 24... -> 5 * blocksize.x          
+			framebuffer_in_shared[index - 40] = framebufferIn[fid - 5 * numOfelementsOneRow];
+			framebuffer_in_shared[index - 32] = framebufferIn[fid - 4 * numOfelementsOneRow];
+			framebuffer_in_shared[index - 24] = framebufferIn[fid - 3 * numOfelementsOneRow];
+			framebuffer_in_shared[index - 16] = framebufferIn[fid - 2 * numOfelementsOneRow];
+			framebuffer_in_shared[index - 8] = framebufferIn[fid - 1 * numOfelementsOneRow];
+		}
+		if (threadIdx.y == blockDim.y - 1) {
+			framebuffer_in_shared[index + 8] = framebufferIn[fid + 1 * numOfelementsOneRow];
+			framebuffer_in_shared[index + 16] = framebufferIn[fid + 2 * numOfelementsOneRow];
+			framebuffer_in_shared[index + 24] = framebufferIn[fid + 3 * numOfelementsOneRow];
+			framebuffer_in_shared[index + 32] = framebufferIn[fid + 4 * numOfelementsOneRow];
+			framebuffer_in_shared[index + 40] = framebufferIn[fid + 5 * numOfelementsOneRow];
+		}
+		framebuffer_in_shared[index] = framebufferIn[fid];
+
+		__syncthreads();
+
+		//apply vertical gaussian blur, write into output frames
+		framebufferOut[fid] += framebuffer_in_shared[index - 40] * 0.0093f;
+		framebufferOut[fid] += framebuffer_in_shared[index - 32] * 0.028002f;
+		framebufferOut[fid] += framebuffer_in_shared[index - 24] * 0.065984f;
+		framebufferOut[fid] += framebuffer_in_shared[index - 16] * 0.121703f;
+		framebufferOut[fid] += framebuffer_in_shared[index - 8] * 0.175713f;
+		framebufferOut[fid] += framebuffer_in_shared[index] * 0.198596f;
+		framebufferOut[fid] += framebuffer_in_shared[index + 8] * 0.175713f;
+		framebufferOut[fid] += framebuffer_in_shared[index + 16] * 0.121703f;
+		framebufferOut[fid] += framebuffer_in_shared[index + 24] * 0.065984f;
+		framebufferOut[fid] += framebuffer_in_shared[index + 32] * 0.028002f;
+		framebufferOut[fid] += framebuffer_in_shared[index + 40] * 0.0093f;
+	}
+}
+
+//downSample kernel
+__global__
+void downScaleSample(int downScaleW, int downScaleH, int downScaleRatio,
+	int w, int h,
+	glm::vec3 * downScale_framebuffer, glm::vec3* framebuffer,
+	int framebufferEdgeOffset)
+{
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+	if (x < downScaleW && y < downScaleH)
+	{
+		int index = (x + framebufferEdgeOffset) + ((y + framebufferEdgeOffset) * (downScaleW + 2 * framebufferEdgeOffset));
+		glm::vec3& f_col = downScale_framebuffer[index];
+		f_col = glm::vec3(0.0f);
+
+		float sampleCount = (float)downScaleRatio * (float)downScaleRatio;
+		int oriFramebufferX, oriFramebufferY;
+		int oriFramebufferInd;
+		//down sample and calculate average
+		for (int i = 0; i < downScaleRatio; i++)
+		{
+			for (int j = 0; j < downScaleRatio; j++)
+			{
+				oriFramebufferX = x * downScaleRatio + i;
+				oriFramebufferY = y * downScaleRatio + j;
+				oriFramebufferX = glm::clamp(oriFramebufferX, 0, w - 1);
+				oriFramebufferY = glm::clamp(oriFramebufferY, 0, h - 1);
+				oriFramebufferInd = oriFramebufferX + (oriFramebufferY * w);
+				f_col += framebuffer[oriFramebufferInd];
+			}
+		}
+		f_col /= sampleCount;
+	}
+}
+
+//bloom effect: brightness filter
+__global__
+void brightnessFilter(int w, int h, glm::vec3 * framebufferIn, glm::vec3 * framebufferOut)
+{
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if (x < w && y < h)
+	{
+		int index = x + y * w;
+		// input frame buffer at index, not reference
+		glm::vec3 f_in = framebufferIn[index];
+		//calculate brightness of this frame buffer
+		float brightness = f_in.r * 0.2126f + f_in.g * 0.7152f + f_in.b * 0.0722f;
+		//framebufferOut[index] = brightness * f_in;
+		brightness /= 2.0f;
+		framebufferOut[index] = glm::vec3(brightness);
+	}
+}
+
+//bloom effect: final stage, combine buffers
+__global__
+void bloomCombineFramebuffers(int w, int h,
+	glm::vec3 * mainFramebuffer, glm::vec3 * sideFramebuffer,
+	glm::vec3 * framebufferOut,
+	int sideFramebuffer_downScaleW,
+	int sideFramebuffer_downScaleRatio, int framebufferEdgeOffset)
+{
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	if (x < w && y < h)
+	{
+		int mainIdx = x + (y * w);
+		glm::vec3 main_col = mainFramebuffer[mainIdx];
+		int sideIdx = ((x / sideFramebuffer_downScaleRatio) + framebufferEdgeOffset) +
+			(((y / sideFramebuffer_downScaleRatio) + framebufferEdgeOffset) *
+			(sideFramebuffer_downScaleW + 2 * framebufferEdgeOffset));
+		glm::vec3 side_col = sideFramebuffer[sideIdx];
+
+		//combination factor
+		float k = 1.0f;
+		//comine color and write to output
+		framebufferOut[mainIdx] = main_col + k * side_col;
+	}
+}
+
+//edge width in gaussian blur
+int bloomGBedge = 5;
 /**
  * Called once at the beginning of the program to allocate memory.
  */
@@ -248,7 +473,26 @@ void rasterizeInit(int w, int h) {
     cudaFree(dev_framebuffer);
     cudaMalloc(&dev_framebuffer,   width * height * sizeof(glm::vec3));
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
-    
+    //initialize auxilliary frame buffers for bloom effect
+	cudaFree(dev_framebufferAux);
+	cudaMalloc(&dev_framebufferAux, width * height * sizeof(glm::vec3));
+	cudaMemset(dev_framebufferAux, 0, width * height * sizeof(glm::vec3));
+
+	int downScaleRatio = DOWNSCALERATIO;
+	cudaFree(dev_framebufferDownScaled);
+	cudaMalloc(&dev_framebufferDownScaled,
+		((width / downScaleRatio) + 2 * bloomGBedge) * ((height / downScaleRatio) + 2 * bloomGBedge) * sizeof(glm::vec3));
+	cudaMemset(dev_framebufferDownScaled, 0,
+		((width / downScaleRatio) + 2 * bloomGBedge) * ((height / downScaleRatio) + 2 * bloomGBedge) * sizeof(glm::vec3));
+	
+	cudaFree(dev_framebufferDownScaledAux);
+	cudaMalloc(&dev_framebufferDownScaledAux,
+		((width / downScaleRatio) + 2 * bloomGBedge) * ((height / downScaleRatio) + 2 * bloomGBedge) * sizeof(glm::vec3));
+	cudaMemset(dev_framebufferDownScaledAux, 0,
+		((width / downScaleRatio) + 2 * bloomGBedge) * ((height / downScaleRatio) + 2 * bloomGBedge) * sizeof(glm::vec3));
+
+
+
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(int));
 
@@ -1195,7 +1439,8 @@ void rasterizeFill(int numPrimitives, int curPrimitiveBeginId, Primitive* primit
  * Perform rasterization.
  */
 void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal,
-	int renderMode, glm::mat4 autoRotateMat4) {
+	int renderMode, glm::mat4 autoRotateMat4,
+	bool bloomEffect) {
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -1266,11 +1511,51 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     // Copy depthbuffer colors into framebuffer
 	// Modified: need more info in fragment shader such as light position
 	glm::vec3 singlePointLight(3.0f, 6.0f, -5.0f);
-	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, singlePointLight, renderMode);
+	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, singlePointLight, renderMode, bloomGBedge);
 	checkCUDAError("fragment shader");
-    // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
-    checkCUDAError("copy render result to pbo");
+    
+	if (bloomEffect)
+	{
+		//BLOOM EFFECT POST PROCESSING
+
+		//BRIGHTNESS FITLER
+		brightnessFilter<<<blockCount2d, blockSize2d>>>(width, height, dev_framebuffer, dev_framebufferAux);
+		//DOWN SCALE
+		int downScaleRatio = DOWNSCALERATIO;
+		dim3 blockCount2dDownScaled((width / downScaleRatio - 1) / blockSize2d.x + 1,
+			(height / downScaleRatio - 1) / blockSize2d.y + 1);
+		downScaleSample<<<blockCount2dDownScaled,blockSize2d>>>(width / downScaleRatio, height / downScaleRatio, downScaleRatio,
+			width, height,
+			dev_framebufferDownScaled, dev_framebufferAux,
+			bloomGBedge);
+		//GAUSSIAN BLUR
+		gaussianBlurHorizon << <blockCount2dDownScaled, blockSize2d >> > (width / downScaleRatio, height / downScaleRatio,
+			dev_framebufferDownScaled, dev_framebufferDownScaledAux,
+			bloomGBedge);
+		gaussianBlurVert << <blockCount2dDownScaled, blockSize2d >> > (width / downScaleRatio, height / downScaleRatio,
+			dev_framebufferDownScaledAux, dev_framebufferDownScaled,
+			bloomGBedge);
+		//FINAL COMBINE
+		bloomCombineFramebuffers << <blockCount2d, blockSize2d >> > (width, height,
+			dev_framebuffer, dev_framebufferDownScaled,
+			dev_framebufferAux,
+			width / downScaleRatio,
+			downScaleRatio,
+			bloomGBedge);
+		checkCUDAError("bloom effect");
+
+		// Copy post-processed framebuffer into OpenGL buffer for OpenGL previewing
+		sendImageToPBO << <blockCount2d, blockSize2d >> > (pbo, width, height, dev_framebufferAux, bloomGBedge, width,1);
+		checkCUDAError("copy render result to pbo");
+	}
+	
+	else
+	{
+		// Copy framebuffer into OpenGL buffer for OpenGL previewing
+		sendImageToPBO << <blockCount2d, blockSize2d >> > (pbo, width, height, dev_framebuffer,bloomGBedge, width, 1);
+		checkCUDAError("copy render result to pbo");
+	}
+	
 }
 
 /**
@@ -1308,8 +1593,20 @@ void rasterizeFree() {
     cudaFree(dev_framebuffer);
     dev_framebuffer = NULL;
 
+	//free extra buffers
+	cudaFree(dev_framebufferAux);
+	dev_framebufferAux = NULL;
+
+	cudaFree(dev_framebufferDownScaled);
+	dev_framebufferDownScaled = NULL;
+
+	cudaFree(dev_framebufferDownScaledAux);
+	dev_framebufferDownScaled = NULL;
+
 	cudaFree(dev_depth);
 	dev_depth = NULL;
+
+
 
     checkCUDAError("rasterize Free");
 }
