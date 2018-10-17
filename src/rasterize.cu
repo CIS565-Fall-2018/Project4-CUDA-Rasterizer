@@ -107,7 +107,7 @@ namespace {
 #define RASTERIZE_POINT 0
 #define RASTERIZE_LINE 0
 #define COLOR_INTERPOLATION 0
-#define TIMER 0
+#define TIMER 1
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -770,14 +770,6 @@ __device__ glm::vec3 getBilinearFilteredPixelColor(TextureData* texture, float u
 	return glm::vec3(r, g, b);
 }
 
-__host__ __device__ static
-void drawpoint(int width, int height, glm::vec3 p, Fragment* fragments, glm::vec3 color)
-{
-	int x = glm::clamp(p.x, 0.f, (float)(width - 1));
-	int y = glm::clamp(p.y, 0.f, (float)(height - 1));
-	fragments[x + y * width].color = color;
-}
-
 __global__ void rasterize_triangle(const int width, const int height, int* depth, int numPrimitives, Primitive* primitives, Fragment* fragmentBuffer) {
 	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 	if (index >= numPrimitives) {
@@ -988,6 +980,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 	time_sendToPBO += double(duration.count());
 	std::cout << "sendImageToPBO cost " << time_sendToPBO << " microsecond" << std::endl;
+	std::cout << "total time is  " << time_sendToPBO + time_render + time_rasterize + time_assembly << " microsecond" << std::endl;
 #endif
 }
 
