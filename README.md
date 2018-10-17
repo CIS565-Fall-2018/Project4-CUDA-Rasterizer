@@ -39,5 +39,4 @@ Far | Mid | Near
 
 * [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
 * [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
-CUDA Path Tracer
-================
+
