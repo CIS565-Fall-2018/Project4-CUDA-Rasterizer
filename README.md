@@ -5,15 +5,34 @@ CUDA Rasterizer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Name: Bowen Yang
+  * [LinkedIn](https://www.linkedin.com/in/%E5%8D%9A%E6%96%87-%E6%9D%A8-83bba6148)
+  * [GitHub](https://github.com/Grillnov)
+  * [Facebook](https://www.facebook.com/yang.bowen.7399)
+  * [Steam](https://steamcommunity.com/id/grillnov)
+* Tested on: Windows 10 x64, i7-6800K @ 3.40GHz 32GB, GTX 1080 8GB (Personal computer at home)
 
-### (TODO: Your README)
+# Description
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+Implement a CUDA rasterizer.
 
+# Part 1: The final produce
+
+![](img/Plain.png)
+I love this little milk truck, especially with bilinear texture filtering.
+
+# Part 2: Rendering only normal
+
+![](img/Normal.png)
+The normal vectors are parsed as colors and shown directly.
+
+# Part 3: Only lines
+
+![](img/Lineframe.png)
+
+# Part 4: Point cloud
+
+![](img/Pointcloud.png)
 
 ### Credits
 
