@@ -27,7 +27,7 @@ For this project, I implemented most of the graphics pipeline for a rasterizer u
 
 Without Anti-Aliasing             |  With Anti-Aliasing
 :-------------------------:|:-------------------------:
-![](renders/10-13-04-23-tri-noAA.PNG)  |  ![](renders/10-13-04-23-tri-noAA.PNG)
+![](renders/10-13-04-23-tri-noAA.PNG)  | ![](renders/10-13-04-22-tri-aa.PNG) 
 
 Images without and with 2x anti-aliasing  
 
