@@ -60,7 +60,7 @@ Recorded the running time for each process. In general, vertex transform and pri
 
 ![](images/primitives.png)
 
-For different primitive type, rasterizing triangle cost a little bit more time than point and line. The performance of rasterizing point and line is quite close.
+The running time for different primitive types. Rasterizing triangle cost a little bit more time than point and line. 
 
 ### Credits
 * [Bilinear filtering Wiki](https://en.wikipedia.org/wiki/Bilinear_filtering)
