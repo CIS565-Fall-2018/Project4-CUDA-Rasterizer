@@ -197,7 +197,10 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer)
         #endif
         
         framebuffer[index] = fragment.color;
-        framebuffer[index] *= glm::dot(fragment.eyeNor, glm::normalize(glm::vec3(1.0f) - fragmentBuffer[index].eyePos));
+
+        #if PRIMTYPE == 3
+            framebuffer[index] *= glm::dot(fragment.eyeNor, glm::normalize(glm::vec3(1.0f) - fragmentBuffer[index].eyePos));
+        #endif
     }
 }
 
@@ -748,31 +751,73 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
-__global__
-void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
-    Fragment* dev_fragmentBuffer, int* dev_depth,
-    int * dev_mutex, int width, int height)
+__device__
+void _rasterizePoints(Fragment* dev_fragmentBuffer, Primitive& primitive, int width, int height)
 {
-    int index = (blockIdx.x * blockDim.x) + threadIdx.x;
-    if (index > totalNumPrimitives) return;
-
-    // get the triangle vertices
-    Primitive primitive = dev_primitives[index];
     VertexOut v0 = primitive.v[0];
     VertexOut v1 = primitive.v[1];
     VertexOut v2 = primitive.v[2];
     glm::vec3 triangle[3] = { glm::vec3(v0.pos),glm::vec3(v1.pos),glm::vec3(v2.pos) };
-    
+
+    int x, y;
+    for (int vertIdx = 0; vertIdx < 3; ++vertIdx) 
+    {
+        x = triangle[vertIdx].x; y = triangle[vertIdx].y;
+        int fragmentId = x + y * width;
+        if ( (x >= 0 && x <= width - 1) && (y >= 0 && y <= height - 1) )
+        {
+            dev_fragmentBuffer[fragmentId].color = glm::vec3(1.f);
+        }
+    }
+}
+
+__device__
+void _rasterizeLines(Fragment* dev_fragmentBuffer, Primitive& primitive, const int *indicies, int width, int height)
+{
+    VertexOut v0 = primitive.v[0];
+    VertexOut v1 = primitive.v[1];
+    VertexOut v2 = primitive.v[2];
+    glm::vec3 triangle[3] = { glm::vec3(v0.pos),glm::vec3(v1.pos),glm::vec3(v2.pos) };
+
+    int x1, x2, y1, y2, dx, dy, y, fragmentId;
+    for (int index = 0; index < 6; index += 2) 
+    {
+        x1 = triangle[indicies[index]].x;    
+        y1 = triangle[indicies[index]].y;
+        x2 = triangle[indicies[index + 1]].x;  
+        y2 = triangle[indicies[index + 1]].y;
+        dx = x2 - x1;                   
+        dy = y2 - y1;
+        for (int x = x1; x <= x2; x++) 
+        {
+            y = y1 + dy * (x - x1) / dx;
+            fragmentId = x + y * width;
+            if ( (x >= 0 && x <= width - 1) && (y >= 0 && y <= height - 1) )
+            {
+                dev_fragmentBuffer[fragmentId].color = glm::vec3(1.f);
+            }
+        }
+    }
+}
+
+__device__
+void _rasterizeTriangles(Fragment* dev_fragmentBuffer, Primitive& primitive, int* dev_depth, int* dev_mutex, int width, int height)
+{
+    VertexOut v0 = primitive.v[0];
+    VertexOut v1 = primitive.v[1];
+    VertexOut v2 = primitive.v[2];
+    glm::vec3 triangle[3] = { glm::vec3(v0.pos),glm::vec3(v1.pos),glm::vec3(v2.pos) };
+
     // find the min and max of triangle bounding box
     AABB bBox = getAABBForTriangle(triangle);
-    const int minX = glm::min(glm::max((int)bBox.min.x, 0 ), width - 1);
-    const int minY = glm::min(glm::max((int)bBox.min.y, 0 ), height - 1);
-    const int maxX = glm::min(glm::max((int)bBox.max.x, 0 ), width - 1);
-    const int maxY = glm::min(glm::max((int)bBox.max.y, 0 ), height - 1);
+    const int minX = glm::min(glm::max((int)bBox.min.x, 0), width - 1);
+    const int minY = glm::min(glm::max((int)bBox.min.y, 0), height - 1);
+    const int maxX = glm::min(glm::max((int)bBox.max.x, 0), width - 1);
+    const int maxY = glm::min(glm::max((int)bBox.max.y, 0), height - 1);
 
     for (int x = minX; x <= maxX; x++)
     {
-        for (int y = minY; y <= maxY; y++) 
+        for (int y = minY; y <= maxY; y++)
         {
             glm::vec3 barycentricCoord = calculateBarycentricCoordinate(triangle, glm::vec2(x, y));
             if (isBarycentricCoordInBounds(barycentricCoord))
@@ -803,16 +848,16 @@ void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
                     // default use vertex normal as color
                     fragment.color = fragment.eyeNor
                 #endif
-                
+
                 const int fragIndex = x + (y * width);
                 bool isSet;
-                do 
+                do
                 {
                     isSet = (atomicCAS(&dev_mutex[fragIndex], 0, 1) == 0);
-                    if (isSet) 
+                    if (isSet)
                     {
                         int depth = -getZAtCoordinate(barycentricCoord, triangle) * INT_MAX;
-                        if (depth < dev_depth[fragIndex]) 
+                        if (depth < dev_depth[fragIndex])
                         {
                             dev_depth[fragIndex] = depth;
                             dev_fragmentBuffer[fragIndex] = fragment;
@@ -822,12 +867,33 @@ void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
                         dev_mutex[fragIndex] = 0;
 
                     }
-                    
+
                 } while (!isSet);
 
             }
         }
     }
+}
+
+__global__
+void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
+    Fragment* dev_fragmentBuffer, int* dev_depth,
+    int * dev_mutex, int width, int height)
+{
+    int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+    if (index > totalNumPrimitives) return;
+
+    // get the triangle vertices
+    Primitive primitive = dev_primitives[index];
+ 
+    #if PRIMTYPE == 1
+        _rasterizePoints(dev_fragmentBuffer, primitive, width, height);
+    #elif PRIMTYPE == 2
+        const int indices[] = { 0, 1, 1, 2, 2, 0 };
+        _rasterizeLines(dev_fragmentBuffer, primitive, indices, width, height);
+    #elif PRIMTYPE == 3
+        _rasterizeTriangles(dev_fragmentBuffer, primitive, dev_depth, dev_mutex, width, height);
+    #endif
 }
 
 /**

@@ -16,7 +16,7 @@
 #define PERSPECTIVE 1
 #define BILINEAR 1
 // PRIMTYPE: 1 = Point, 2 = Line, 3 = Triangle
-#define PRIMTYPE 3 
+#define PRIMTYPE 2 
 
 namespace tinygltf{
 	class Scene;
