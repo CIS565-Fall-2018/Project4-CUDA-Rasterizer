@@ -9,11 +9,13 @@ CUDA Rasterizer
 
 Analysis 
 ======================
-* blocksize1d is set to 128 unchanged
+* When parallelize primitives, blocksize is set to 128 unchanged.
 
-* image order is direct light integrator, full light integrator and naive integrator
+* When parallelize pixels, blocksize is set to 25 x 25 unchanged.
 
-* rendering time is measured in second
+* For shared memory in tile based rasterizer, primitive bucket size is 256 unchanged.
+
+* Rendering time is measured in frame per second, so higher is better.
 
 ---
 
