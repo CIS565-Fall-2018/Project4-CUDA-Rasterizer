@@ -118,16 +118,25 @@ static int antialiasing = 2;
  * Kernel that writes the image to the OpenGL PBO directly.
  */
 __global__
-void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image, int aaSize, int largeW) {
+void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image, int antialiasing, int width) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 	int index = x + (y * w);
 
 	if (x < w && y < h) {
+
 		glm::vec3 color;
-		color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-		color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-		color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+		for (int i = 0; i < antialiasing; ++i) {
+			for (int j = 0; j < antialiasing; ++j) {
+				int tempIndex = ((antialiasing * x) + i) + (((antialiasing * y) + j) * width);
+				color.x += glm::clamp(image[tempIndex].x, 0.0f, 1.0f) * 255.0;
+				color.y += glm::clamp(image[tempIndex].y, 0.0f, 1.0f) * 255.0;
+				color.z += glm::clamp(image[tempIndex].z, 0.0f, 1.0f) * 255.0;
+			}
+		}
+
+		color /= antialiasing * antialiasing;
+
 		// Each thread writes one pixel location in the texture (textel)
 		pbo[index].w = 0;
 		pbo[index].x = color.x;
