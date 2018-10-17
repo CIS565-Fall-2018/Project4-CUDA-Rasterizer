@@ -806,18 +806,7 @@ __global__ void rasterization(int num, Primitive *primitives, Fragment *fragment
 							bary_centric.y * primitive.v[1].eyePos +
 							bary_centric.z * primitive.v[2].eyePos;
 #if PERSPECTIVE
-						glm::vec2 a = bary_centric.x * primitive.v[0].texcoord0 / primitive.v[0].eyePos.z
-							+ bary_centric.y * primitive.v[1].texcoord0 / primitive.v[1].eyePos.z
-							+ bary_centric.z * primitive.v[2].texcoord0 / primitive.v[2].eyePos.z;
-
-						float b = bary_centric.x / primitive.v[0].eyePos.z
-							+ bary_centric.y / primitive.v[1].eyePos.z
-							+ bary_centric.z / primitive.v[2].eyePos.z;
-
-						fragments[index].texcoord0 = a / b;
-
-
-						/*glm::vec3 w = {
+						glm::vec3 w = {
 							bary_centric.x / eye_pos[0].z,
 							bary_centric.y / eye_pos[1].z,
 							bary_centric.z / eye_pos[2].z,
@@ -834,7 +823,7 @@ __global__ void rasterization(int num, Primitive *primitives, Fragment *fragment
 
 						a *= c;
 						b *= c;
-						fragments[index].texcoord0 = glm::vec2(a, b);*/
+						fragments[index].texcoord0 = glm::vec2(a, b);
 #else
 						fragments[index].texcoord0 = bary_centric.x * primitive.v[0].texcoord0 +
 							bary_centric.y * primitive.v[1].texcoord0 +
