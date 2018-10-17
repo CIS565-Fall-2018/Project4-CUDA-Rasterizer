@@ -19,8 +19,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <device_launch_parameters.h>
 
-#define SSAA 2
-
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -128,25 +126,10 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 
     if (x < w && y < h) {
         glm::vec3 color;
-#if SSAA
-		for (int i = 0; i < SSAA; i++) {
-			for (int j = 0; j < SSAA; j++) {
-				int x1 = SSAA * x + i;
-				int y1 = SSAA * y + j;
-				int w1 = SSAA * w;
-				int index1 = x1 + y1 * w1;
-				color.x += glm::clamp(image[index1].x, 0.0f, 1.0f) * 255.0;
-				color.y += glm::clamp(image[index1].y, 0.0f, 1.0f) * 255.0;
-				color.z += glm::clamp(image[index1].z, 0.0f, 1.0f) * 255.0;
-			}
-		}
-		color /= (float)SSAA * SSAA;
-#else
         color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
         color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
         color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
-#endif
-		// Each thread writes one pixel location in the texture (textel)
+        // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
         pbo[index].x = color.x;
         pbo[index].y = color.y;
@@ -201,10 +184,6 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 void rasterizeInit(int w, int h) {
     width = w;
     height = h;
-#if SSAA
-	width *= SSAA;
-	height *= SSAA;
-#endif
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -848,12 +827,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-#if SSAA
-	sendImageToPBO << <blockCount2d, blockSize2d >> > (pbo, width / SSAA, height / SSAA, dev_framebuffer);
-#else
-	sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
-#endif
-	checkCUDAError("copy render result to pbo");
+    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+    checkCUDAError("copy render result to pbo");
 }
 
 /**
