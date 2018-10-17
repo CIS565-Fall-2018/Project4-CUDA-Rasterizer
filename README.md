@@ -19,20 +19,26 @@ Implement a CUDA rasterizer.
 # Part 1: The final produce
 
 ![](img/Plain.png)
+
 I love this little milk truck, especially with bilinear texture filtering.
 
 # Part 2: Rendering only normal
 
 ![](img/Normal.png)
+
 The normal vectors are parsed as colors and shown directly.
 
 # Part 3: Only lines
 
 ![](img/Lineframe.png)
 
+Line primitives are rasterized.
+
 # Part 4: Point cloud
 
 ![](img/Pointcloud.png)
+
+Points are rasterized as point clouds.
 
 ### Credits
 
