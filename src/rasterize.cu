@@ -23,6 +23,9 @@
 #define WIREFRAME_MODE 0
 #define POINT_CLOUD_MODE 0
 
+
+#define RASTERIZER_BLOCK 256
+
 namespace {
 
 	typedef unsigned short VertexIndex;
@@ -903,7 +906,9 @@ void rasterizeTriangle(Primitive p, Fragment* fragBuf, int* depth, int* mutex, i
 
 							// generate interpolated attributes
 							if (p.v[0].dev_diffuseTex != NULL) {
-								fragBuf[f_idx].texcoord0 = w * ((p.v[0].texcoord0 * bary.x / tri[0].z) + (p.v[1].texcoord0 * bary.y / tri[1].z) + (p.v[2].texcoord0 * bary.z / tri[2].z));
+								fragBuf[f_idx].texcoord0 = w * (  (p.v[0].texcoord0 * bary.x / tri[0].z) 
+																+ (p.v[1].texcoord0 * bary.y / tri[1].z) 
+																+ (p.v[2].texcoord0 * bary.z / tri[2].z));
 							}
 							fragBuf[f_idx].eyeNor = w * ((p.v[0].eyeNor * bary.x / tri[0].z) + (p.v[1].eyeNor * bary.y / tri[1].z) + (p.v[2].eyeNor * bary.z / tri[2].z));
 						}
@@ -1103,8 +1108,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> > (width, height, dev_depth);
 
 	// TODO: rasterize
-	dim3 num_blocks((totalNumPrimitives + 128 - 1) / 128);
-	_rasterizer << <num_blocks, 128 >> > (totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex, width, height);
+	dim3 num_blocks((totalNumPrimitives + RASTERIZER_BLOCK - 1) / RASTERIZER_BLOCK);
+	_rasterizer << <num_blocks, RASTERIZER_BLOCK >> > (totalNumPrimitives, dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex, width, height);
 
 
 	// Copy depthbuffer colors into framebuffer
@@ -1152,6 +1157,9 @@ void rasterizeFree() {
 
 	cudaFree(dev_depth);
 	dev_depth = NULL;
+
+	cudaFree(dev_mutex);
+	dev_mutex = NULL;
 
 	checkCUDAError("rasterize Free");
 }
