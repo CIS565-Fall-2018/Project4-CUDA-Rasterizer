@@ -20,25 +20,25 @@ The current version of the rasterizer supprots the following features:
 
 | Color             |  Normals |  Depth |
 :-------------------------:|:-------------------------:|:-------------------------: |:-------------------------:
-|![](renders/color.png)  |  ![](renders/normals.png) |  ![](renders/depth.png)
+|![](renders/color.PNG)  |  ![](renders/normals.PNG) |  ![](renders/depth.PNG)
 
 
 * Shaders - Lamberts and Blinn Phong
 
 * Instancing
 
-![](renders/instancing.png)
+![](renders/instancing.PNG)
 
 
 * Texture Mapping (2D) with bilinear filtering
 
-![](renders/render_cesium.png)
+![](renders/render_cesium.PNG)
 
 * SuperSample Antialiasing
 
 | No SSAA             |  SSAA 2 |
 :-------------------------:|:-------------------------:|:-------------------------:
-|![](renders/ssaa_1.png)  |  ![](renders/ssaa_2.png) | 
+|![](renders/ssaa_1.PNG)  |  ![](renders/ssaa_2.PNG) | 
 
 # General Performance Analysis
 
