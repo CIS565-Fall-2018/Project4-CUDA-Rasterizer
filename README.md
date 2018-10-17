@@ -29,6 +29,7 @@ This project implements a a rasterizer with the following features:
  - Supersampling Anti-Aliasing (SSAA) using the ["random" algorithm](https://en.wikipedia.org/wiki/Supersampling#Supersampling_patterns)
  - Point cloud drawing mode
  - Line drawing mode
+ - Back-face culling
 
 All features may be toggled by changing the defined constants at the start of `src/rasterize.cu`.
 
@@ -70,6 +71,16 @@ The graph below shows the difference in FPS across each of the three drawing mod
 ![](img/draw-mode-graph.png)
 
 Line drawing may be further improved by calculating each pixel in parallel. Currently, one line is calculated per thread. Utilizing shared memory instead of global memory in all drawing modes is also likely to yield a significant performance benefit. 
+
+#### Back-face culling
+
+In a naive approach, all triangles are rendered whether they are visible in the field of view or not. Back-face culling is meant to improve performance by only rendering the shapes visible to the camera. 
+
+![](img/culling-graph.png)
+
+Analysis shows that, at least for this implementation, back-face culling is not guaranteed to improve performance. Like most things in computer science, it depends. Performance actually gets worse with culling enabled when rendering the box model. This is likely because the box has only a small number of large fragments on screen at any given time. The overhead for the culling calculation is simply not woth it. The conclusion is very different for the cow model however. Unlike the box, the cow has many small triangles, only about half of which are visible at a fixed perspective. The cow model is more representative of typical applications, where the detail is high, requiring many small shapes. Thus, it's expected as a whole back-face culling will improve performance in real life applications. 
+
+As with the other features, shared memory would likely help significantly here. As well as some sort of caching for the objects that are not in view. 
 
 ## Methodology
 
