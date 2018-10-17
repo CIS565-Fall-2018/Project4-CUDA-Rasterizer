@@ -48,6 +48,8 @@ Textures
 
 *Shading includes textures*
 
+Textures are drawn using perspective-correct interpolation. UV coordinates, which are not discrete, are interpolated using neighboring pixel values using bilinear interpolation.
+
 Color Interpolation
 ------------
 
