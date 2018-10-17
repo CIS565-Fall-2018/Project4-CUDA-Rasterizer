@@ -52,6 +52,10 @@ int main(int argc, char **argv) {
 
     frame = 0;
     seconds = time(NULL);
+	
+	//to measure time performance
+	shaderTimer = time(NULL);
+
     fpstracker = 0;
 
     // Launch CUDA/GL
@@ -99,6 +103,14 @@ void mainLoop() {
 float scale = 1.0f;
 float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
 float x_angle = 0.0f, y_angle = 0.0f;
+
+//render mode toggle
+int renderMode = RenderMode::Triangle;
+
+//for auto rotation
+float autoRotateAngle = 0.0f;
+float autoRotateSpeed = 0.3f;
+
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
@@ -119,8 +131,21 @@ void runCuda() {
 	glm::mat4 MV = V * M;
 	glm::mat4 MVP = P * MV;
 
+	double shaderTimerNew = glfwGetTime();
+	double deltaTime = shaderTimerNew - shaderTimer;
+	shaderTimer = shaderTimerNew;
+
+	//rotate the object
+	autoRotateAngle += autoRotateSpeed * deltaTime;
+	if (autoRotateAngle >= 360.0f)
+	{
+		autoRotateAngle = 0.0f;
+	}
+
+	glm::mat4 autoRotateMat = glm::rotate(autoRotateAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+
     cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal);
+	rasterize(dptr, MVP, MV, MV_normal, renderMode, autoRotateMat);
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
@@ -188,6 +213,8 @@ bool init(const tinygltf::Scene & scene) {
 
     glUseProgram(passthroughProgram);
     glActiveTexture(GL_TEXTURE0);
+
+	shaderTimer = glfwGetTime();
 
     return true;
 }
@@ -325,9 +352,25 @@ void errorCallback(int error, const char *description) {
 }
 
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods) {
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        glfwSetWindowShouldClose(window, GL_TRUE);
+    if (action == GLFW_PRESS) {
+		switch (key)
+		{
+		case GLFW_KEY_ESCAPE:
+			glfwSetWindowShouldClose(window, GL_TRUE);
+			break;
+		case GLFW_KEY_1:
+			renderMode = RenderMode::Triangle;
+			break;
+		case GLFW_KEY_2:
+			renderMode = RenderMode::Wireframe;
+			break;
+		case GLFW_KEY_3:
+			renderMode = RenderMode::Points;
+			break;
+		}
+		
     }
+
 }
 
 //----------------------------
@@ -396,5 +439,9 @@ void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 void mouseWheelCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
 	const double s = 1.0;	// sensitivity
+
+	if (yoffset > 0 && z_trans > -1.5f) {
+		return;
+	}
 	z_trans += (float)(s * yoffset);
 }

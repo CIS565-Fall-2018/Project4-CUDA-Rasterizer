@@ -33,6 +33,13 @@ using namespace std;
 int frame;
 int fpstracker;
 double seconds;
+
+//TO measure time performance
+double shaderTimer;
+
+//render Mode
+enum RenderMode{Triangle, Wireframe, Points};
+
 int fps = 0;
 GLuint positionLocation = 0;
 GLuint texcoordsLocation = 1;
