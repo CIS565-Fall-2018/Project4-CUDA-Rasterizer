@@ -5,17 +5,32 @@ CUDA Rasterizer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Yan Wu
+	* [LinkedIn](https://www.linkedin.com/in/yan-wu-a71270159/)
+* Tested on: Windows 10, i7-8750H @ 2.20GHz 16GB, GTX 1060 6GB (Personal Laptop)
 
-### (TODO: Your README)
+### Brief Introduction
+In this project, I used CUDA to implement a simplified rasterized graphics pipeline, similar to the OpenGL pipeline. I implemented vertex shading, primitive assembly, rasterization, fragment shading, and a framebuffer for the basic pipeline. And there are also some extra features.
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+* [What is rasterization?](https://en.wikipedia.org/wiki/Rasterisation)
+* Basic pipeline
+  * Clear the fragment buffer with some default value.
+  * Vertex shading
+  * Primitive assembly
+  * Rasterization
+  * Fragments to depth buffer
+  * Fragment shading
+  * Fragment to framebuffer writing
 
+### Results
+
+* Results for basic Pipelines<br />
+  <img src="/images/basic pipeline/triangle.gif" width="30%">
+  <img src="/images/basic pipeline/box.gif" width="30%">
+  <img src="/images/basic pipeline/duck.gif" width="30%">
 
 ### Credits
 
+* [ScreenToGif(used in this project)](https://www.screentogif.com/)
 * [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
 * [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
