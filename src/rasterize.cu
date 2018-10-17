@@ -808,7 +808,8 @@ void xyz(glm::vec4 * v4, glm::vec3 * v3) {
 	v3->z = v4->z;
 }
 
-__global__ void rasterizePrimitive (
+__global__
+void kernRasterizePrimitive (
 		int N,
 		Primitive * dev_primitives, Fragment * dev_fragmentBuffer,
 		int * dev_depth, int * dev_mutex, int width, int height) {
@@ -999,7 +1000,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	dim3 numThreadsPerBlock(128, 1, 1);
 	int primitiveBlockCount = (numThreadsPerBlock.x + totalNumPrimitives - 1) / numThreadsPerBlock.x;
 	// Launch primitive kernel
-	rasterizePrimitive <<< primitiveBlockCount, numThreadsPerBlock >>>(
+	kernRasterizePrimitive <<< primitiveBlockCount, numThreadsPerBlock >>>(
 			totalNumPrimitives,
 			dev_primitives, dev_fragmentBuffer, dev_depth, dev_mutex,
 			width, height);
