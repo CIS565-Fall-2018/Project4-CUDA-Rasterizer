@@ -117,6 +117,7 @@ static glm::vec3 *dev_framebuffer = NULL;
 
 static int *dev_tilePrimitives = NULL;
 static unsigned int *dev_primitiveIdxPerTile = NULL;
+static unsigned int *hst_primitiveIdxPerTile = NULL;
 static unsigned int maxPrimitivesPerTile = 512;
 
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
@@ -652,6 +653,7 @@ void rasterizeSetTileBuffers(){
 	maxPrimitivesPerTile = totalNumPrimitives; // TODO: make this smaller
 	cudaMalloc(&dev_tilePrimitives, tileWidth * tileHeight * maxPrimitivesPerTile * sizeof(int));
 	cudaMalloc(&dev_primitiveIdxPerTile, tileWidth * tileHeight * sizeof(unsigned int));
+	hst_primitiveIdxPerTile = (unsigned int*)malloc(tileWidth * tileHeight * sizeof(unsigned int));
 }
 
 
@@ -877,11 +879,73 @@ void rasterizeByTile(Primitive* primitives, int* tilePrimitives, unsigned int* p
 }
 
 
+__global__
+void rasterizeByPrimitivesInTile(Primitive* primitives, int* tilePrimitives, int numPrimitivesThisTile, Fragment* fragmentBuffer,
+	int width, int height, int tilePixelSize, int tileIdx, int tileOriginX, int tileOriginY, unsigned int maxPrimitivesPerTile) {
+	
+	int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+	extern __shared__ int depthBuffer[];
+	int portion = tilePixelSize * tilePixelSize / numPrimitivesThisTile;
+	int limit = (int)fminf(tilePixelSize * tilePixelSize, (idx + 1) * portion);
+	for (int i = idx * portion; i < limit; i++) {
+		depthBuffer[i] = INT_MAX;
+	}
+
+	__syncthreads();
+
+	// parallelize over primitives
+	if (idx < numPrimitivesThisTile){
+		int pid = tilePrimitives[tileIdx * maxPrimitivesPerTile + idx];
+		const Primitive& p = primitives[pid];
+		glm::vec3 vertices[3];
+		vertices[0] = glm::vec3(p.v[0].pos);
+		vertices[1] = glm::vec3(p.v[1].pos);
+		vertices[2] = glm::vec3(p.v[2].pos);
+		AABB box = getAABBForTriangle(vertices);
+
+		// loop over all pixels of the tile to check if it's in the triangle
+		for (int j = 0; j < tilePixelSize; j++) {
+			for (int i = 0; i < tilePixelSize; i++) {
+				int fragment_j = fminf(height - 1, tileOriginX + j);
+				int fragment_i = fminf(width - 1, tileOriginY + i);
+				int fidx = fragment_j * width + fragment_i;
+				glm::vec2 fragmentPos = glm::vec2(fragment_i + 0.5, fragment_j + 0.5f);
+				glm::vec3 baryCoor = calculateBarycentricCoordinate(vertices, fragmentPos);
+				
+				/*Fragment& frag = fragmentBuffer[fidx];
+				frag.color = glm::vec3(1, 1, 1);
+				frag.eyePos = glm::vec3(1, 1, 1);
+				frag.eyeNor = glm::vec3(1, 1, 1);
+				frag.eyeLightDir = glm::vec3(1, 1, 1);*/
+
+				// if it is, store p's value into the pixel
+				if (isBarycentricCoordInBounds(baryCoor)) {
+					// check for depth
+					float depth = -getZAtCoordinate(baryCoor, vertices) / 10.0f; // let's say near clip is at 0 and far is at 10
+					int intDepth = depth * INT_MAX;
+					int depthIdx = j * tilePixelSize + i;
+
+					if (intDepth < atomicMin(&depthBuffer[depthIdx], intDepth)) {
+						Fragment& frag = fragmentBuffer[fidx];
+						frag.color = p.v[0].col * baryCoor[0] + p.v[1].col * baryCoor[1] + p.v[2].col * baryCoor[2];
+						frag.eyePos = p.v[0].eyePos * baryCoor[0] + p.v[1].eyePos * baryCoor[1] + p.v[2].eyePos * baryCoor[2];
+						frag.eyeNor = p.v[0].eyeNor * baryCoor[0] + p.v[1].eyeNor * baryCoor[1] + p.v[2].eyeNor * baryCoor[2];
+						frag.eyeLightDir = glm::normalize(glm::vec3(0, 100, 100) - frag.eyePos);
+					}
+				}
+			}
+		}
+	}
+}
+
+
+
 
 /**
  * Perform rasterization.
  */
-void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal, bool useTiles) {
+void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal, int renderMode) {
     int sideLength2d = 8;
     dim3 blockSize2d(sideLength2d, sideLength2d);
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
@@ -926,7 +990,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	dim3 numBlocksForPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
 	// Rasterize
-	if (useTiles) {
+	if (renderMode > 0) {
 		// reset the tilePrimitive and fragment buffers
 		cudaMemset(dev_tilePrimitives, -1, tileWidth * tileHeight * maxPrimitivesPerTile * sizeof(int));
 		cudaMemset(dev_primitiveIdxPerTile, 0, tileWidth * tileHeight * sizeof(unsigned int));
@@ -939,9 +1003,32 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 		// Rasterize by tile
 		dim3 blockCountTiles2D((tileWidth - 1) / blockSize2d.x + 1,
 			(tileHeight - 1) / blockSize2d.y + 1);
-		rasterizeByTile << <blockCountTiles2D, blockSize2d >> > (dev_primitives, dev_tilePrimitives, dev_primitiveIdxPerTile,
-			dev_fragmentBuffer, width, height, tileWidth, tileHeight, tilePixelSize, maxPrimitivesPerTile);
-		checkCUDAError("Rasterize by tile error");
+		
+		if (renderMode == 1) {
+			rasterizeByTile << <blockCountTiles2D, blockSize2d >> > (dev_primitives, dev_tilePrimitives, dev_primitiveIdxPerTile,
+				dev_fragmentBuffer, width, height, tileWidth, tileHeight, tilePixelSize, maxPrimitivesPerTile);
+			checkCUDAError("Rasterize by tile error");
+		}
+		else {
+			cudaMemcpy(hst_primitiveIdxPerTile, dev_primitiveIdxPerTile, tileWidth * tileHeight * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+			for (int j = 0; j < tileHeight; j++) {
+				for (int i = 0; i < tileWidth; i++) {
+					int tileIdx = i + (j * tileWidth);
+					int tileOriginX = i * tilePixelSize;
+					int tileOriginY = j * tilePixelSize;
+
+					int numPrimitivesThisTile = hst_primitiveIdxPerTile[tileIdx];
+					if (numPrimitivesThisTile > 0) {
+						dim3 numBlocksForTilePrimitives((numPrimitivesThisTile + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+						rasterizeByPrimitivesInTile << <numBlocksForTilePrimitives, numThreadsPerBlock, tilePixelSize * tilePixelSize * sizeof(int) >> > (
+							dev_primitives, dev_tilePrimitives, numPrimitivesThisTile, dev_fragmentBuffer,
+							width, height, tilePixelSize, tileIdx, tileOriginX, tileOriginY, maxPrimitivesPerTile
+							);
+						checkCUDAError("rasterize by primitives in tile error");
+					}
+				}
+			}
+		}
 	}
 	else {
 		// reset the fragment and depth buffer
@@ -1005,6 +1092,9 @@ void rasterizeFree() {
 
 	cudaFree(dev_primitiveIdxPerTile);
 	dev_primitiveIdxPerTile = NULL;
+
+	free(hst_primitiveIdxPerTile);
+	hst_primitiveIdxPerTile = NULL;
 
     checkCUDAError("rasterize Free");
 }

@@ -14,6 +14,10 @@ CUDA Rasterizer
 *DO NOT* leave the README to the last minute! It is a crucial part of the
 project, and we will not be able to grade you without a good README.
 
+- performance test
+    - size of tiles
+    - 2 ways of tile-based rasterization vs normal of different primitives at different distances
+
 
 ### Credits
 

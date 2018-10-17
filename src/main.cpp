@@ -99,7 +99,7 @@ void mainLoop() {
 //---------RUNTIME STUFF---------
 //-------------------------------
 float scale = 1.0f;
-float x_trans = 0.0f, y_trans = 0.0f, z_trans = -3.0f;
+float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
 float x_angle = 0.0f, y_angle = 0.0f;
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -125,7 +125,7 @@ void runCuda() {
 
 	std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
 
-	rasterize(dptr, MVP, MV, MV_normal, useTiles);
+	rasterize(dptr, MVP, MV, MV_normal, renderMode);
 	
 	std::chrono::high_resolution_clock::time_point endTime = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double, std::milli> duro = endTime - startTime;
