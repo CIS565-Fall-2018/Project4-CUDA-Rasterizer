@@ -39,11 +39,11 @@ xxx.
 
 * checkerboard mid distance
   
-![](img/checkerboard_mid.png)
+![](img/checkerboard_mid.JPG)
 
 * checkerboard near distance
   
-![](img/checkerboard_near.png)
+![](img/checkerboard_near.JPG)
 
 ---
 
