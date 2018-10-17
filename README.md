@@ -58,6 +58,12 @@ The performance impact is further illustrated by the graph below. The flower mod
 
 ![](img/ssaa-graph.png)
 
+The graph below compares the percentage of time spent in each pipeline stage with and without SSAA. 
+
+![](img/ssaa-pipelines-graph.png)
+
+It is not surprising to see the PBO stage greatly increase. The random sampling takes place in this stage, allowing us to reduce the supersampled image back to the original resolution. I was surprised to see the render stage decrease. It is important to keep in mind, however, that this is representing the relative percentage of overall time, not the total time spent in each stage. Further analysis into the profile shows the render time did, in fact, increase with SSAA enabled even though the relative percent of time spent decreased as shown in the graph. This is why the other minor pipeline stages are greatly reduced. With SSAA enabled, the render and PBO stage dominate even more than usual, while the actual time spent in seconds of pipelines such as assembly remain constant.
+
 The benefits of SSAA can be achieved with much higher performance by implementing [MSAA](https://en.wikipedia.org/wiki/Multisample_anti-aliasing). This special case of supersampling only upscales edges of the objects, where anti aliasing provides the largest benefit. Since the entire image is no longer being upscaled, the result is comparable to SSAA with significantly better performance. 
 
 #### Alternate Drawing Modes
