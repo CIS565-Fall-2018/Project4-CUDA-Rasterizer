@@ -41,12 +41,12 @@ namespace {
 		// The attributes listed below might be useful, 
 		// but always feel free to modify on your own
 
-		 glm::vec3 eyePos;	// eye space position used for shading
-		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
 		// glm::vec3 col;
-		 glm::vec2 texcoord0;
-		 TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
+		glm::vec2 texcoord0;
+		TextureData* dev_diffuseTex = NULL;
+		int texWidth, texHeight;
 		// ...
 	};
 
@@ -67,6 +67,7 @@ namespace {
 		
         VertexAttributeTexcoord texcoord0;
 		TextureData* dev_diffuseTex;
+        int texWidth, texHeight;
 		// ...
 	};
 
@@ -135,29 +136,69 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
     }
 }
 
+__device__
+glm::vec3 getTexColor(TextureData* tex, int width, float u, float v) 
+{
+    int index = u + v * width;
+    return glm::vec3(tex[index * 3], tex[index * 3 + 1], tex[index * 3 + 2]) / 255.f;
+}
+
+// for more information on bilinear filtering:
+// https://en.wikipedia.org/wiki/Bilinear_filtering
+// used sample code from this source
+__device__
+glm::vec3 getBilinearFilteredPixelColor(Fragment &fragment)
+{
+    float u = fragment.texcoord0.x * fragment.texWidth - 0.5f;
+    float v = fragment.texcoord0.y * fragment.texHeight - 0.5f;
+    int x = glm::floor(u);
+    int y = glm::floor(v);
+    float u_ratio = u - x;
+    float v_ratio = v - y;
+    float u_opposite = 1.f - u_ratio;
+    float v_opposite = 1.f - v_ratio;
+
+    // retrieve texture data
+    glm::vec3 texXY = getTexColor(fragment.dev_diffuseTex, fragment.texWidth, x, y);
+    glm::vec3 texX1Y = getTexColor(fragment.dev_diffuseTex, fragment.texWidth, x + 1, y);
+    glm::vec3 texXY1 = getTexColor(fragment.dev_diffuseTex, fragment.texWidth, x, y + 1);
+    glm::vec3 texX1Y1 = getTexColor(fragment.dev_diffuseTex, fragment.texWidth, x + 1, y + 1);
+
+    return (texXY * u_opposite + texX1Y * u_ratio) * v_opposite + 
+           (texXY1 * u_opposite + texX1Y1 * u_ratio) * v_ratio;
+}
+
 /** 
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) 
+{
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
     if (x < w && y < h) 
     {
-        framebuffer[index] = fragmentBuffer[index].color;
-
 		// TODO: add your fragment shader code here
         Fragment fragment = fragmentBuffer[index];
+ 
+        #if TEXTURE
+            if (fragment.dev_diffuseTex != NULL) 
+            {
+                #if BILINEAR
+                    fragment.color = getBilinearFilteredPixelColor(fragment);
+                #else
+                    int u = fragment.texcoord0.x * fragment.texWidth;
+                    int v = fragment.texcoord0.y * fragment.texHeight;
+                    fragment.color = getColor(fragment.dev_diffuseTex, fragment.texWidth, u, v);
+                #endif
+            }
+        #endif
         
-        //int u = fragment.texcoord0.x * fragment.texWidth;
-        //int v = fragment.texcoord0.y * fragment.texHeight;
-        //fragment.color = getColor(fragment.dev_diffuseTex, fragment.texWidth, u, v);
-
+        framebuffer[index] = fragment.color;
         framebuffer[index] *= glm::dot(fragment.eyeNor, glm::normalize(glm::vec3(1.0f) - fragmentBuffer[index].eyePos));
     }
-
 }
 
 /**
@@ -166,9 +207,11 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 void rasterizeInit(int w, int h) {
     width = w;
     height = h;
+
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
+
     cudaFree(dev_framebuffer);
     cudaMalloc(&dev_framebuffer,   width * height * sizeof(glm::vec3));
     cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
@@ -666,6 +709,14 @@ void _vertexTransformAndAssembly(
         primitive.dev_verticesOut[vid].pos = pos;
         primitive.dev_verticesOut[vid].eyePos = eyePos;
         primitive.dev_verticesOut[vid].eyeNor = eyeNor;
+
+        // retrieve texture data
+        #if TEXTURE == 1
+            primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
+            primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
+            primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
+            primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
+        #endif
 	}
 }
 
@@ -723,29 +774,53 @@ void _rasterize(int totalNumPrimitives, Primitive* dev_primitives,
     {
         for (int y = minY; y <= maxY; y++) 
         {
-            glm::vec3 barycentric = calculateBarycentricCoordinate(triangle, glm::vec2(x, y));
-            if (isBarycentricCoordInBounds(barycentric))
+            glm::vec3 barycentricCoord = calculateBarycentricCoordinate(triangle, glm::vec2(x, y));
+            if (isBarycentricCoordInBounds(barycentricCoord))
             {
-                const int fragmentId = x + (y * width);
+                Fragment fragment;
+                fragment.eyePos = v0.eyePos * barycentricCoord.x + v1.eyePos * barycentricCoord.y + v2.eyePos * barycentricCoord.z;
+                fragment.eyeNor = v0.eyeNor * barycentricCoord.x + v1.eyeNor * barycentricCoord.y + v2.eyeNor * barycentricCoord.z;
+                // use texture color
+                #if TEXTURE == 1
+                    fragment.dev_diffuseTex = v0.dev_diffuseTex;
+                    fragment.texWidth = v0.texWidth;
+                    fragment.texHeight = v0.texHeight;
+                    // perspective correct texture coordinates
+                    #if PERSPECTIVE == 1
+                        const float zCoord = 1.f / (barycentricCoord.x / v0.eyePos.z
+                                                  + barycentricCoord.y / v1.eyePos.z
+                                                  + barycentricCoord.z / v2.eyePos.z);
+                        fragment.texcoord0 = zCoord * (barycentricCoord.x * (v0.texcoord0 / v0.eyePos.z)
+                                                     + barycentricCoord.y * (v1.texcoord0 / v1.eyePos.z)
+                                                     + barycentricCoord.z * (v2.texcoord0 / v2.eyePos.z));
+                    // no perspective correct
+                    #else
+                        fragment.texcoord0 = barycentric.x * v0.texcoord0 + barycentric.y * v1.texcoord0 + barycentric.z * v2.texcoord0;
+                    #endif
+                // do not use texture color
+                #else
+                    fragment.dev_diffuseTex = NULL;
+                    // default use vertex normal as color
+                    fragment.color = fragment.eyeNor
+                #endif
+                
+                const int fragIndex = x + (y * width);
                 bool isSet;
                 do 
                 {
-                    isSet = (atomicCAS(&dev_mutex[fragmentId], 0, 1) == 0);
+                    isSet = (atomicCAS(&dev_mutex[fragIndex], 0, 1) == 0);
                     if (isSet) 
                     {
-                        int depth_z = -getZAtCoordinate(barycentric, triangle) * INT_MAX;
-                        if (depth_z < dev_depth[fragmentId]) {
-                            dev_depth[fragmentId] = depth_z;
-                            Fragment& fragment = dev_fragmentBuffer[fragmentId];
-                            fragment.eyePos = v0.eyePos * barycentric.x + v1.eyePos * barycentric.y + v2.eyePos * barycentric.z;
-                            fragment.eyeNor = v0.eyeNor * barycentric.x + v1.eyeNor * barycentric.y + v2.eyeNor * barycentric.z;
-                            fragment.color = fragment.eyeNor;
+                        int depth = -getZAtCoordinate(barycentricCoord, triangle) * INT_MAX;
+                        if (depth < dev_depth[fragIndex]) 
+                        {
+                            dev_depth[fragIndex] = depth;
+                            dev_fragmentBuffer[fragIndex] = fragment;
                         }
-                    }
-                    
-                    if (isSet) 
-                    {
-                        dev_mutex[fragmentId] = 0;
+
+                        //reset mutex
+                        dev_mutex[fragIndex] = 0;
+
                     }
                     
                 } while (!isSet);
