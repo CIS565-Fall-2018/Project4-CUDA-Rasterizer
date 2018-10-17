@@ -61,7 +61,7 @@ In this scene, tile based rasterizer is better in all distance. This is because 
 
 ### analysis
 
-In the box scene, scan line rasterizer is doing better at far distance because each primitive takes less pixel and there are more primitives than in the checkerboard scene. But as the mesh moves closer to the camera, performance of tile based rasterizer remain the same whereas performance of scan line rasterizer is getting worse.
+In the box scene, scan line rasterizer is doing better at far distance because each primitive takes less pixel and there are more primitives than in the checkerboard scene. But as the mesh moves closer to the camera, performance of tile based rasterizer remain the same whereas performance of scan line rasterizer is getting worse because the workload for each thread increases as the primitive covers more pixels.
 
 ### images
 
@@ -123,9 +123,9 @@ Just like the box scene, the performance of scan line rasterizer starts to get w
 
 Just like the box scene, the performance of scan line rasterizer starts to get worse as the mesh moves closer to the camera whereas the performance of tile based rasterizer almost remains the same. 
 
-But there is something else worth noticing. When the mesh is far away, you can spot some black triangles on the rendered image. This is because the shared memory used to store primitives for each tile(block) is not large enough to hold all the potential triangles. Therefore, some triangles that contributes to the rendering are not cached in the shared memory. 
+But there is something else worth noticing. When the mesh is far away, you can spot some black triangles on the rendered image. This is because the shared memory used to store primitives for each tile(block) is not large enough to hold all the potential triangles. Therefore, some triangles that contributes to the rendering are not cached in the shared memory. And if you run the program, you can see the black triangles are flickering, which means, for each frame, the triangles which belongs to a tile but not cached are not the same one. This is because the process of caching the potential triangles runs in parallel within each tile(block), and the run time of this process in one thread is not guaranteed to be the same for every frame, sometime slightly faster, sometime slightly slower. So when one thread is fast enough to use atomicadd to lock the slot and cache the primitve in one frame, it might not be as quick in the next frame and other threads who is faster may do the same thing before this thread gets a chance.
 
-One solution is to use a better algorithm to check whether a triangle will contribute to a tile or not. Currently, I’m only using AABB to check if they overlap. This is a conservative way to do it which means it will give you a triangle whose AABB overlaps the tile but itself doesn’t. As a result, they will occupy the limited shared memory slot which is supposed for triangles that actually overlaps the tile. This is also the reason why the black triangles disappear when the mesh is closer. When the mesh is closer, the AABB overlapping test rejects more easily resulting in less falsely occupied shared memory slot.
+One solution to solve the flickering triangle is to use a better algorithm to check whether a triangle will contribute to a tile or not. Currently, I’m only using AABB to check if they overlap. This is a conservative way to do it which means it will give you a triangle whose AABB overlaps the tile but itself doesn’t. As a result, they will occupy the limited shared memory slot which is supposed for triangles that actually overlaps the tile. This is also the reason why the black triangles disappear when the mesh is closer. When the mesh is closer, the AABB overlapping test rejects more easily resulting in less falsely occupied shared memory slot.
 
 Another solution is to use global memory to store primitives for each tile(block), just like a [previous implementation](https://github.com/Aman-Sachan-asach/CUDA-Rasterizer) of this project did. But I don’t think that makes sense at all. Because from what I read online, tile based rendering utilize “on chip” memory to compensate for scare global memory and its low accessing speed. And since “on chip” is equivalent to “shared memory” in CUDA lingo, I think it’s better to use it instead of global memory as the primitive buckets.
 
@@ -201,7 +201,11 @@ But there is something new worth noticing. This is the only scene in all the fiv
 
 ## 6. Summary
 
-* xxx. 
+* Tile based rasterizer is better when primitives are few but occupied pixels are many.(Simple mesh near distance)
+
+* Scan line rasterizer is better when primitives are many but occupied pixels are few.(Complex mesh far distance)
+
+* Using shared memory for tile based rasterizer requires a more accurate(less conservative) algorithm to check whether a primitive should be cached.
 
 ---
 
