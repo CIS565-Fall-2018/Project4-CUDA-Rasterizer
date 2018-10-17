@@ -119,24 +119,24 @@ static int * dev_mutex = NULL;  // mutex buffer for locking depth buffer write
  * Kernel that writes the image to the OpenGL PBO directly.
  */
 __global__ 
-void sendImageToPBO(uchar4 *pbo, int w, int h, int alias, glm::vec3 *image) {
+void sendImageToPBO(uchar4 *pbo, int w, int h, int antialias, glm::vec3 *image) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
     if (x < w && y < h) {
         glm::vec3 color;
-		for (int i = 0; i < alias; ++i)
+		for (int i = 0; i < antialias; ++i)
 		{
-			int AA_x = x * alias + i;
-			for (int j = 0; j < alias; ++j)
+			int AA_x = x * antialias + i;
+			for (int j = 0; j < antialias; ++j)
 			{
-				int AA_y = y * alias + j;
-				int AA_index = AA_x + AA_y * alias * w;
+				int AA_y = y * antialias + j;
+				int AA_index = AA_x + AA_y * antialias * w;
 				color += image[AA_index];
 			}
 		}
-		color /= (alias * alias);
+		color /= (antialias * antialias);
 
         color.x = glm::clamp(color.x, 0.0f, 1.0f) * 255.0;
         color.y = glm::clamp(color.y, 0.0f, 1.0f) * 255.0;
@@ -854,7 +854,6 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
 		(height - 1) / blockSize2d.y + 1);
 
-	std::cout << "Triangles: " << totalNumPrimitives << std::endl;
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
 
