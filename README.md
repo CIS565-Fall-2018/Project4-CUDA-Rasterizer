@@ -8,6 +8,8 @@ CUDA Rasterizer
   * [LinkedIn](https://www.linkedin.com/in/conniechang44), [Demo Reel](https://www.vimeo.com/ConChang/DemoReel)
 * Tested on: Windows 10, Intel Xeon CPU E5-1630 v4 @ 3.70 GHz, GTX 1070 8GB (SIG Lab)
 
+[![](vimeo.PNG)](https://vimeo.com/295495793)
+
 ![](renders/10-15-02-10-duck-texture.PNG)  
 A render of a duck with a diffuse texture
 
