@@ -31,7 +31,7 @@ namespace {
 
 #define BYTES_PER_PIXEL 3
 
-#define NUM_INSTANCES 9
+#define NUM_INSTANCES 1
 
 #define AA_SUPER_SAMPLE
 //#define AA_MULTI_SAMPLE
