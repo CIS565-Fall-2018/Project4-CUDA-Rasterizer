@@ -18,8 +18,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define DISPLAY_TRIANGLE false
-#define DISPLAY_LINE true
+#define DISPLAY_TRIANGLE true
+#define DISPLAY_LINE false
 #define DISPLAY_POINT false
 
 #define CULL_FACE true
@@ -212,7 +212,7 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
 		const float factor = 1.0f / 255.0f;
 		glm::vec3 colorNormalized = factor * texelFetched;
-		if (DISPLAY_TRIANGLE || DISPLAY_POINT || DISPLAY_LINE)
+		if (DISPLAY_TRIANGLE)
 		{
 			buffer = glm::max(0.f, glm::dot(L, N)) * colorNormalized;
 		}
@@ -221,8 +221,12 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 			glm::vec3 norm = frag.eyeNor;
 			buffer = glm::normalize(norm);
 		}
+		if (DISPLAY_POINT || DISPLAY_LINE)
+		{
+			buffer = frag.color;
+		}
 		
-		buffer += glm::vec3(pow(glm::max(0.f, glm::dot(N, H)), 200.f));
+		buffer += glm::vec3(pow(glm::max(0.f, glm::dot(N, H)), 128.0f));
 		//buffer = glm::normalize(buffer);
 	}
 }
@@ -969,10 +973,10 @@ void rasterizeLineHelper(const glm::vec3 &a, const glm::vec3 &b,
 
 	for (int i = 0; i <= end - begin; ++i)
 	{
-		const glm::vec3 p = lerp(a, b, (i + 0.f) / (end - begin));
+		const glm::vec3 p = lerp(a, b, (i + 0.0f) / (end - begin));
 		const int index = (int)p.x + (int)p.y * w;
 
-		dev_fragmentBuffer[index].color = glm::vec3(1.f);
+		dev_fragmentBuffer[index].color = glm::vec3(1.0f, 1.0f, 1.0f);
 	}
 }
 
@@ -992,12 +996,9 @@ void rasterizeLine(int totalNumPrimitives, Primitive *dev_primitives,
 	const glm::vec3 &v1 = glm::vec3(primitive.v[1].pos);
 	const glm::vec3 &v2 = glm::vec3(primitive.v[2].pos);
 
-	if (primitive.primitiveType == Line)
-	{
-		rasterizeLineHelper(v0, v1, dev_fragmentBuffer, w, h);
-		rasterizeLineHelper(v1, v2, dev_fragmentBuffer, w, h);
-		rasterizeLineHelper(v2, v0, dev_fragmentBuffer, w, h);
-	}
+	rasterizeLineHelper(v0, v1, dev_fragmentBuffer, w, h);
+	rasterizeLineHelper(v1, v2, dev_fragmentBuffer, w, h);
+	rasterizeLineHelper(v2, v0, dev_fragmentBuffer, w, h);
 }
 
 __global__
@@ -1019,20 +1020,17 @@ void rasterizePoint(int totalNumPrimitives, Primitive *dev_primitives,
 		glm::vec3(primitive.v[2].pos)
 	};
 
-	if (primitive.primitiveType == Point)
+	for (int i = 0; i < 3; ++i)
 	{
-		for (int i = 0; i < 3; ++i)
-		{
-			const int x = (int)tri[i].x;
-			const int y = (int)tri[i].y;
-			const int index = x + y * w;
+		const int x = (int)tri[i].x;
+		const int y = (int)tri[i].y;
+		const int index = x + y * w;
 
-			if (x < 0 || x >= w || y < 0 || y >= h)
-			{
-				continue;
-			}
-			dev_fragmentBuffer[index].color = glm::vec3(1.f);
+		if (x < 0 || x >= w || y < 0 || y >= h)
+		{
+			continue;
 		}
+		dev_fragmentBuffer[index].color = glm::vec3(1.0f, 1.0f, 1.0f);
 	}
 }
 /**
