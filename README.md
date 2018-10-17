@@ -31,7 +31,7 @@ Analysis
 
 ### analysis
 
-xxx.
+In this scene, tile based rasterizer is better in all distance. This is because when we use scan line rasterizer, we parallelize the primitives and the primitives are so few in this scene (only two triangles) therefore we can not utilize parallel processing efficiently. Even worse, when the two triangles cover a lot of pixels, we are spending two much time in each thread looping through the pixels which will impact parallelism further. However, when we use tile based rasterizer, we parallelize the pixels. For each pixel, it only needs to worry about the primitive that overlaps the tile it belongs to. In this scene, there will be two in the worst scenario, which means the looping for each pixel will be very short and that means we are exploiting the most out of parallelism.
 
 ### images
 
@@ -61,7 +61,7 @@ xxx.
 
 ### analysis
 
-xxx.
+In the box scene, scan line rasterizer is doing better at far distance because each primitive takes less pixel and there are more primitives than in the checkerboard scene. But as the mesh moves closer to the camera, performance of tile based rasterizer remain the same whereas performance of scan line rasterizer is getting worse.
 
 ### images
 
@@ -91,7 +91,7 @@ xxx.
 
 ### analysis
 
-xxx.
+Just like the box scene, the performance of scan line rasterizer starts to get worse as the mesh moves closer to the camera whereas the performance of tile based rasterizer almost remains the same.
 
 ### images
 
@@ -111,7 +111,7 @@ xxx.
 
 ## 4. Duck Scene 
 
-### overview
+### overview (tile based rasterizer is the second row)
 
 ![](img/duck_render.jpg)
 
@@ -121,7 +121,13 @@ xxx.
 
 ### analysis
 
-xxx.
+Just like the box scene, the performance of scan line rasterizer starts to get worse as the mesh moves closer to the camera whereas the performance of tile based rasterizer almost remains the same. 
+
+But there is something else worth noticing. When the mesh is far away, you can spot some black triangles on the rendered image. This is because the shared memory used to store primitives for each tile(block) is not large enough to hold all the potential triangles. Therefore, some triangles that contributes to the rendering are not cached in the shared memory. 
+
+One solution is to use a better algorithm to check whether a triangle will contribute to a tile or not. Currently, I’m only using AABB to check if they overlap. This is a conservative way to do it which means it will give you a triangle whose AABB overlaps the tile but itself doesn’t. As a result, they will occupy the limited shared memory slot which is supposed for triangles that actually overlaps the tile. This is also the reason why the black triangles disappear when the mesh is closer. When the mesh is closer, the AABB overlapping test rejects more easily resulting in less falsely occupied shared memory slot.
+
+Another solution is to use global memory to store primitives for each tile(block), just like a [previous implementation](https://github.com/Aman-Sachan-asach/CUDA-Rasterizer) of this project did. But I don’t think that makes sense at all. Because from what I read online, tile based rendering utilize “on chip” memory to compensate for scare global memory and its low accessing speed. And since “on chip” is equivalent to “shared memory” in CUDA lingo, I think it’s better to use it instead of global memory as the primitive buckets.
 
 ### images
 
@@ -153,7 +159,7 @@ xxx.
 
 ## 5. Cow Scene 
 
-### overview
+### overview (tile based rasterizer is the second row)
 
 ![](img/cow_render.jpg)
 
@@ -163,7 +169,7 @@ xxx.
 
 ### analysis
 
-xxx.
+But there is something new worth noticing. This is the only scene in all the five scenes where the performance of tile based rasterizer is worse than scan line rasterizer when the mesh is close to the camera. One of reasons might be the triangles are relatively small in terms of pixels they occupy. This is good when we parallelize the primitives since one thread will not loop for too long which means we are distributing works among appropriate amount of threads. On the other hand, for tile based rasterizer, small triangles means for each tile(block), there will be more primitives stored in their shared memories, therefore each thread will loop for a longer time. This means we are not distributing our works appropriately. 
 
 ### images
 
