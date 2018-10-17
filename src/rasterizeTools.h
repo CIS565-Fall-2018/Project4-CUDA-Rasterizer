@@ -99,3 +99,40 @@ float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3])
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
 }
+
+__host__ __device__ static
+glm::vec3 BCInterpVector(glm::vec3 bc, glm::vec3 vectors[3]) {
+	/*glm::vec3 tri1[3] = { tri[0], tri[1], bc };
+	glm::vec3 tri2[3] = { tri[1], tri[2], bc };
+	glm::vec3 tri3[3] = { tri[0], tri[2], bc };
+	float s = calculateSignedArea(tri);
+	float s1 = calculateSignedArea(tri1);
+	float s2 = calculateSignedArea(tri2);
+	float s3 = calculateSignedArea(tri3);
+
+	return vectors[0] * s2 / s + vectors[1] * s3 / s + vectors[2] * s1 / s;*/
+
+	return glm::normalize(bc.x * vectors[0] + bc.y * vectors[1] + bc.z * vectors[2]);
+}
+
+__host__ __device__ static
+glm::vec2 PCInterpUV(glm::vec3 bc, glm::vec3 eyePositions[3], glm::vec2 UVs[3]) {
+	
+
+	glm::vec2 tz = bc.x * UVs[0] / eyePositions[0].z + bc.y * UVs[1] / eyePositions[1].z + bc.z * UVs[2] / eyePositions[2].z;
+	float cz = bc.x / eyePositions[0].z + bc.y / eyePositions[1].z + bc.z / eyePositions[2].z;
+	return tz / cz;
+
+}
+
+__host__ __device__ static
+bool isBackface(const glm::vec3 tri[3]) {
+	glm::vec3 v1 = tri[1] - tri[0];
+	glm::vec3 v2 = tri[2] - tri[0];
+	glm::vec3 nor = glm::cross(v1, v2);
+	glm::vec3 eyeDir = glm::vec3(0.0f, 0.0f, -1.0f);
+	if (glm::dot(nor, eyeDir) < 0) {
+		return true;
+	}
+	return false;
+}

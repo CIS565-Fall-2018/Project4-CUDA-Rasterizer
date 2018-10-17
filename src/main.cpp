@@ -121,6 +121,7 @@ void runCuda() {
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
 	rasterize(dptr, MVP, MV, MV_normal);
+	cout << "elapsed time: " << timer().getGpuElapsedTimeForPreviousOperation() << endl;
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
