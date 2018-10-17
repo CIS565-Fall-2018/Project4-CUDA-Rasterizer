@@ -44,7 +44,7 @@ A comparision of texture mapping with and without perspective correction is show
 
 Scene without Perspective Correction      | Scene with Perspective Correction
 :-------------------------:|:-------------------------:
-<img src="img/check.PNG" width="200"/> |  <img src="img/check_corrected.PNG" width="200"/> 
+<img src="img/check.PNG" width="300"/> |  <img src="img/check_corrected.PNG" width="300"/> 
 
 Bilinear interpolation is basically a techique used to prevent aliasing effect and make the resulting image
 looks more natural and smooth by taking the color of surrounding pixels into account while generating the final
@@ -54,6 +54,7 @@ to demonstrate the effect.
 ![](img/interpolation.png) 
 
 ***Back-face Culling***
+
 Back-face culling is intended to reduce the amount of computation by eliminating the pixels that cannot be captured from 
 the camera. However, while implementing it I found that I didn't see a significant speed up, and it actually creates some 
 funny effect.
@@ -67,6 +68,7 @@ The things that are culled out can be seen below
 ![](img/culled.gif) 
 
 ***Super-Sampled Antialiasing***
+
 By super-sampling, one is essentially making more grids and creating higher resolution. This is a sacrifice on memory to 
 give more details to the display. The difference can be seen below.
 
@@ -86,8 +88,6 @@ Notice how computation increase while we move closer to the rendered object due 
 
 ![](img/z.png) 
   
-
-
 
 ### Credits
 
