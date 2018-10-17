@@ -17,6 +17,7 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <device_launch_parameters.h>
 
 namespace {
 
@@ -46,6 +47,7 @@ namespace {
 		// glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
+		 glm::vec4 color;
 		// int texWidth, texHeight;
 		// ...
 	};
@@ -100,6 +102,8 @@ namespace {
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
+static int *mutex;
+static int screenDepth;
 
 static int width = 0;
 static int height = 0;
@@ -165,6 +169,11 @@ void rasterizeInit(int w, int h) {
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(int));
+
+	cudaMalloc((void **)&mutex, width * height * sizeof(int));
+	cudaMemset(mutex, 0, width * height * sizeof(int));
+
+	screenDepth = INT_MAX;
 
 	checkCUDAError("rasterizeInit");
 }
@@ -638,6 +647,28 @@ void _vertexTransformAndAssembly(
 		// Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
 		// Then divide the pos by its w element to transform into NDC space
 		// Finally transform x and y to viewport space
+		glm::vec3 &position = primitive.dev_position[vid];
+		glm::vec3 &normal = primitive.dev_normal[vid];
+
+		VertexOut &vertex = primitive.dev_verticesOut[vid];
+
+		glm::vec4 projected = glm::vec4(position, 1) * MVP;
+		projected /= projected.w;
+		projected.x = (projected.x + 1.f) * 0.5f;
+		projected.y = (1.f - projected.y) * 0.5f;
+		projected.x *= width;
+		projected.y *= height;
+		projected.z = (projected.z + 1.f) * 0.5f;
+
+		vertex.pos = projected;
+		vertex.eyePos = glm::vec3(MV * glm::vec4(position, 1));
+		vertex.eyeNor = glm::normalize(MV_normal * primitive.dev_normal[vid]);
+
+		// Give the vertex a random color
+		vertex.dev_diffuseTex = NULL;
+		thrust::default_random_engine rng = thrust::default_random_engine(utilhash(vid + 11));
+		thrust::uniform_real_distribution<float> u01(0, 1);
+		vertex.color = glm::vec4(u01(rng), u01(rng), u01(rng), 1.0f);
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
@@ -660,12 +691,12 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 		// TODO: uncomment the following code for a start
 		// This is primitive assembly for triangles
 
-		//int pid;	// id for cur primitives vector
-		//if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-		//	pid = iid / (int)primitive.primitiveType;
-		//	dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-		//		= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		//}
+		int pid;	// id for cur primitives vector
+		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+			pid = iid / (int)primitive.primitiveType;
+			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
+				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		}
 
 
 		// TODO: other primitive types (point, line)
@@ -673,6 +704,47 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
+/**
+ * Rasterization kernel.
+ */
+__global__
+void rasterizeKernel(int numPrims, int w, int h, Fragment *fragmentBuffer, Primitive* dev_primitives, int* depth, int* mutex, int screenDepth) {
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	int index = x + (y * w);
+
+	if (index < numPrims) {
+		Primitive &p = dev_primitives[index];
+		glm::vec3 tri[3];
+		tri[0] = glm::vec3(p.v[0].pos);
+		tri[1] = glm::vec3(p.v[1].pos);
+		tri[2] = glm::vec3(p.v[2].pos);
+
+		AABB aabb = getAABBForTriangle(tri);
+
+		for (int col = aabb.min.x; col <= aabb.max.x; ++col) {
+			for (int row = aabb.min.y; row <= aabb.max.y; ++row) {
+				glm::vec2 point = glm::vec2(col, row);
+				int fragmentIndex = index = col + (row * w);
+
+				glm::vec3 bary = calculateBarycentricCoordinate(tri, point);
+
+				if (isBarycentricCoordInBounds(bary)) {
+					bool isSet;
+					do {
+						isSet = (atomicCAS(&mutex[index], 0, 1) == 0);
+						if (isSet) {
+							fragmentBuffer[fragmentIndex].color = glm::vec3(p.v->color);
+						}
+						if (isSet) {
+							mutex[index] = 0;
+						}
+					} while (!isSet);
+				}
+			}
+		}
+	}
+}
 
 
 /**
@@ -723,7 +795,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// TODO: rasterize
-
+	rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth, mutex, screenDepth);
 
 
     // Copy depthbuffer colors into framebuffer
@@ -771,6 +843,9 @@ void rasterizeFree() {
 
 	cudaFree(dev_depth);
 	dev_depth = NULL;
+
+	cudaFree(mutex);
+	mutex = NULL;
 
     checkCUDAError("rasterize Free");
 }
