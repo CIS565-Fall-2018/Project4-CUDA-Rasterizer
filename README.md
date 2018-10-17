@@ -44,7 +44,7 @@ The performance impact is extra index computations and memory access. The curren
   
 #### Perspective-Correct Texture Mapping
   
-If you only compute the fragment attributes using the original vertex attributes and barycentric weights, you get "alline" interpolation. The problem with this method is most clearly seen in textures when perspective is used, and results in the texturing of neighboring triangles appearing "disjoint" with one another. To fix this, a perspective adjustment was applied by calculating the perspective-correct depth "w" and multiplting each contribution by this factor divided by the vertex z position for that attribute. In code:  
+If you only compute the fragment attributes using the original vertex attributes and barycentric weights, you get "alline" interpolation. The problem with this method is most clearly seen in textures when perspective is used, and results in the texturing of neighboring triangles appearing "disjoint" with one another. To fix this, a perspective adjustment was applied by calculating the perspective-correct depth "w" and multiplying each contribution by this factor divided by the vertex z position for that attribute. In code:  
   
 ```cpp
 // "bary" is the barycentric weights, and "tri" stores the vertex positions
@@ -61,7 +61,7 @@ The result is reduced unwanted distortion on attributes due to distortion (the s
   
 The second image also has bilinear filtering. While the pattern does not look perfect, probably due to rounding errors, it is singnificantly improved from the affine case.  
   
-The performance is not expected to suffer much from this feature, but while this part is compute light, it still requires several global memory accesses. The current implementation also has to pass the texture information to each vertex, and then to each fragment, which compounds the problem of memory use and access.
+The performance is not expected to suffer much from this feature, but while this part is compute light, it still requires several global memory accesses. The current implementation also has to pass the texture information to each vertex, and then to each fragment, which compounds the problem of memory use and access. Perhaps if there was an implementation grouping fragments by material or texture, and only passing the constant data (non-uv attributes for the texture) once for the group of fragments, it could improve performance. One could also make the assumption those fragments would appear grouped near each other in screen space if sharing a texture, so there is less worry of random access slowdown from this method as well.  
   
   
 ### Depth Buffer  
@@ -95,7 +95,7 @@ if (inside) {
 }
 ```
   
-However, by forcing serialization of memory access, we force a loss of performance. In a dense scene with many overlapping primitives, we can expect severe framerate drops since we lose some of the advantage of parallelism. This is necessary for accurately rendering a scene with depth and avoiding any race conditions from the overlapping objects.  
+However, by forcing serialization of memory access, we force a loss of performance. In a dense scene with many overlapping primitives, we can expect severe framerate drops since we lose some of the advantage of parallelism. This is necessary for accurately rendering a scene with depth and avoiding any race conditions from the overlapping objects. The only optimization that comes to mind is comparing with the z-buffer first to avoid locking and then not needing it, and then comparing again in the critical section to avoid race conditions. Perhaps even shared memory can be used to pre-load the entire z-buffer to speed up access for dense scenes.  
   
   
   
