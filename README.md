@@ -69,11 +69,11 @@ xxx.
 
 * box mid distance
   
-![](img/box_mid.png)
+![](img/box_mid.JPG)
 
 * box near distance
   
-![](img/box_near.png)
+![](img/box_near.JPG)
 
 ---
 
@@ -99,11 +99,11 @@ xxx.
 
 * flower mid distance
   
-![](img/flower_mid.png)
+![](img/flower_mid.JPG)
 
 * flower near distance
   
-![](img/flower_near.png)
+![](img/flower_near.JPG)
 
 ---
 
@@ -133,19 +133,19 @@ xxx.
 
 * duck mid distance scan line
   
-![](img/duck_mid_0.png)
+![](img/duck_mid_0.JPG)
 
 * duck mid distance tile based
   
-![](img/duck_mid_1.png)
+![](img/duck_mid_1.JPG)
 
 * duck near distance scan line
   
-![](img/duck_near_0.png)
+![](img/duck_near_0.JPG)
 
 * duck near distance tile based
   
-![](img/duck_near_1.png)
+![](img/duck_near_1.JPG)
 
 ---
 
@@ -175,19 +175,19 @@ xxx.
 
 * cow mid distance scan line
   
-![](img/cow_mid_0.png)
+![](img/cow_mid_0.JPG)
 
 * cow mid distance tile based
   
-![](img/cow_mid_1.png)
+![](img/cow_mid_1.JPG)
 
 * cow near distance scan line
   
-![](img/cow_near_0.png)
+![](img/cow_near_0.JPG)
 
 * cow near distance tile based
   
-![](img/cow_near_1.png)
+![](img/cow_near_1.JPG)
 
 ---
 
