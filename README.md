@@ -9,48 +9,193 @@ CUDA Rasterizer
 
 Analysis 
 ======================
+* blocksize1d is set to 128 unchanged
 
-![](img/box_far.JPG)
+* image order is direct light integrator, full light integrator and naive integrator
 
-![](img/box_mid.JPG)
+* rendering time is measured in second
 
-![](img/box_near.JPG)
+---
 
+## 1. Checkerboard Scene 
+
+### overview
+
+![](img/checkerboard_render.jpg)
+
+### rendering time
+
+![](img/checkerboard.JPG)
+
+### analysis
+
+xxx.
+
+### images
+
+* checkerboard far distance
+  
 ![](img/checkerboard_far.JPG)
 
-![](img/checkerboard_mid.JPG)
+* checkerboard mid distance
+  
+![](img/checkerboard_mid.png)
 
-![](img/checkerboard_near.JPG)
+* checkerboard near distance
+  
+![](img/checkerboard_near.png)
 
+---
+
+## 2. Box Scene 
+
+### overview
+
+![](img/box_render.jpg)
+
+### rendering time
+
+![](img/box.JPG)
+
+### analysis
+
+xxx.
+
+### images
+
+* box far distance
+  
+![](img/box_far.JPG)
+
+* box mid distance
+  
+![](img/box_mid.png)
+
+* box near distance
+  
+![](img/box_near.png)
+
+---
+
+## 3. Flower Scene 
+
+### overview
+
+![](img/flower_render.jpg)
+
+### rendering time
+
+![](img/flower.JPG)
+
+### analysis
+
+xxx.
+
+### images
+
+* flower far distance
+  
 ![](img/flower_far.JPG)
 
-![](img/flower_mid.JPG)
+* flower mid distance
+  
+![](img/flower_mid.png)
 
-![](img/flower_near.JPG)
+* flower near distance
+  
+![](img/flower_near.png)
 
+---
+
+## 4. Duck Scene 
+
+### overview
+
+![](img/duck_render.jpg)
+
+### rendering time
+
+![](img/duck.JPG)
+
+### analysis
+
+xxx.
+
+### images
+
+* duck far distance scan line
+  
 ![](img/duck_far_0.JPG)
 
+* duck far distance tile based
+  
 ![](img/duck_far_1.JPG)
 
-![](img/duck_mid_0.JPG)
+* duck mid distance scan line
+  
+![](img/duck_mid_0.png)
 
-![](img/duck_mid_1.JPG)
+* duck mid distance tile based
+  
+![](img/duck_mid_1.png)
 
-![](img/duck_near_0.JPG)
+* duck near distance scan line
+  
+![](img/duck_near_0.png)
 
-![](img/duck_near_1.JPG)
+* duck near distance tile based
+  
+![](img/duck_near_1.png)
 
+---
+
+## 5. Cow Scene 
+
+### overview
+
+![](img/cow_render.jpg)
+
+### rendering time
+
+![](img/cow.JPG)
+
+### analysis
+
+xxx.
+
+### images
+
+* cow far distance scan line
+  
 ![](img/cow_far_0.JPG)
 
+* cow far distance tile based
+  
 ![](img/cow_far_1.JPG)
 
-![](img/cow_mid_0.JPG)
+* cow mid distance scan line
+  
+![](img/cow_mid_0.png)
 
-![](img/cow_mid_1.JPG)
+* cow mid distance tile based
+  
+![](img/cow_mid_1.png)
 
-![](img/cow_near_0.JPG)
+* cow near distance scan line
+  
+![](img/cow_near_0.png)
 
-![](img/cow_near_1.JPG)
+* cow near distance tile based
+  
+![](img/cow_near_1.png)
+
+---
+
+## 6. Summary
+
+* xxx. 
+
+---
 
 ### Credits
 
