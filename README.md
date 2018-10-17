@@ -36,6 +36,12 @@ fragBuf[f_idx].texcoord0 = w * (  (p.v[0].texcoord0 * bary.x / tri[0].z)
                                  + (p.v[2].texcoord0 * bary.z / tri[2].z));
 ```
   
+The result is reduced unwanted distortion on attributes due to distortion (the same formula can be used on normals, colors, etc). A comparison between affine (first image) and corrected (second image) textering is seen below for a checkerboard texture: 
+  
+![Affine](images/perspective_incorrect_interpolation2.png) ![Perspective Correct](bilinear_tex_filter.PNG)  
+  
+The second image also has bilinear filtering. While the pattern does not look perfect, probably due to rounding errors, it is singnificantly improved from the affine case.
+  
   
 ### Credits
 
