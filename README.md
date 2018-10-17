@@ -48,9 +48,9 @@ Assign red, green and blue for vertices of each triangle then use barycentric in
 | ------------- |:-------------:|
 | ![](images/point.gif)      | ![](images/line.gif)   |
 
-For rasterizing points, just check if that position of the fragment is in the screen and assign each fragment with a color on that pixel.
+For rasterizing points, check if that position of the fragment is in the screen and assign each fragment with a color on that pixel.
 
-For rasterizing lines, loop all edges for each triangle and calculate the length for each line segment. Divide the line segment into tiny part then assigned color on that pixel. 
+For rasterizing lines, loop all edges for each triangle and calculate the length for each line segment. Divide the line segment into tiny subdivision then assigned color on that pixel. 
 
 ### Perform Analysis
 
