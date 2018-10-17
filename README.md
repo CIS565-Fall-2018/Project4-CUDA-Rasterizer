@@ -25,7 +25,7 @@ Since vertices are given specific UV coordinates on the texture in floating poin
   
 #### Perspective-Correct Texture Mapping
   
-If you only compute the fragment attributes using the original vertex attributes and barycentric weights, you get "alline" interpolation. The problem with this method is most clearly seen in textures when perspective is used, and results in the texturing of neighboring triangles appearing "disjoint" with one another. To fix this, a perspective adjustment was applied by calculating the depth "w" and multiplting each contribution by this factor divided by the vertex z position for that attribute. In code:  
+If you only compute the fragment attributes using the original vertex attributes and barycentric weights, you get "alline" interpolation. The problem with this method is most clearly seen in textures when perspective is used, and results in the texturing of neighboring triangles appearing "disjoint" with one another. To fix this, a perspective adjustment was applied by calculating the perspective-correct depth "w" and multiplting each contribution by this factor divided by the vertex z position for that attribute. In code:  
   
 ```cpp
 // "bary" is the barycentric weights, and "tri" stores the vertex positions
@@ -41,6 +41,43 @@ The result is reduced unwanted distortion on attributes due to distortion (the s
 ![Affine](images/perspective_incorrect_interpolation2.PNG) ![Perspective Correct](images/bilinear_tex_filter.PNG)  
   
 The second image also has bilinear filtering. While the pattern does not look perfect, probably due to rounding errors, it is singnificantly improved from the affine case.
+  
+  
+### Depth Buffer  
+  
+Both a integer depth buffer and an integer mutex buffer are stored with one entry per fragment. This simple implementation uses the mutex to force access to the depth buffer, and then to the fragment buffer, as a critical section. While this will affect the reasterizer speed, sometimes significantly, it avoids any race conditions caused by multiple primitives overlapping the same pixel coordinate. Currently it only has integer precision, so z-fighting for close objects may not be completely avoided. Part of the rasterizer code has been reproduced below. The relevant part is the "do while" loop that creates a critical section preventing access to the current fragment index by all other threads by using an atomic function to lock the address.
+  
+```cpp
+inside = isBarycentricCoordInBounds(bary);
+
+float z_float = getZAtCoordinate(bary, tri);
+if (z_float < 0 || z_float > 1) continue;
+int z = z_float * INT_MAX;
+
+bool isSet = false;
+
+if (inside) {
+    isSet = false;
+    do {
+        isSet = (atomicCAS(mutex + f_idx, 0, 1) == 0);
+        if (isSet) {
+            // Critical section
+            if (z < depth[f_idx]) {
+                depth[f_idx] = z;
+                fragBuf[f_idx] = f_true;
+            }
+        }
+        if (isSet) {
+            mutex[f_idx] = 0;
+        }
+    } while (!isSet);
+}
+```
+  
+  
+  
+  
+  
   
   
 ### Credits
