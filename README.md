@@ -62,6 +62,10 @@ The graph below shows the same information in a stacked graph. From here, we see
 ![](renders/Average_Runtime_Optimization.png)  
 The average runtime of each feature  
 
+In addition, a comparison was done for different numbers of primitives. The following FPS data was captured for the default positions of each scene. The rasterizer performs best for the duck, which also has the largest number of primitives. This occurs because the rasterization step is done with a primitive for each thread. Therefore, more threads are processing the render. On the other hand, the triangle only has a single thread running because it only contains one primitive. If the user zooms in too much on the triangle such that the triangle covers over half the screen, FPS can easily drop to 1 since it's a single thread coloring half the screen.  
+
+![](renders/FPS_Primitives.png)  
+FPS for different objects with different numbers of primitives
 
 ### Credits
 
