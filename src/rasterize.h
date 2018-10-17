@@ -11,6 +11,15 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
+#include <chrono>
+#include <iostream>
+#include <string>
+
+#define RAST_TRIS 1
+#define RAST_LINES 0
+#define RAST_POINTS 0
+#define TEXTURE 1
+#define ANTIALIAS 2
 
 namespace tinygltf{
 	class Scene;
