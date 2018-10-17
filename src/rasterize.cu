@@ -46,7 +46,7 @@ namespace {
 		glm::vec3 color;
 		glm::vec2 texcoord0;
 		TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
+		int texWidth, texHeight;
 		// ...
 	};
 
@@ -146,8 +146,22 @@ void render(const int w, const int h, Fragment *fragmentBuffer, glm::vec3 *frame
 
     if (x < w && y < h) {
 		// TODO: add your fragment shader code here
-		float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, glm::vec3(-0.5774, -0.5774f, 0.5774f)), 0.06f, 1.0f);
-		framebuffer[index] = fragmentBuffer[index].color * lambert;
+		const glm::vec3 lightVec = glm::vec3(-0.5774, -0.5774f, 0.5774f);
+		glm::vec3 frameColor;
+		glm::vec3 eyeNor;
+
+		for (int i = 0; i < SSAA; i++) {
+			for (int j = 0; j < SSAA; j++) {
+				int aaindex = (x * SSAA) + i + (((y * SSAA) + j) * w * SSAA);
+				frameColor += fragmentBuffer[aaindex].color;
+				eyeNor += fragmentBuffer[aaindex].eyeNor;
+			}
+		}
+		frameColor /= (SSAA * SSAA);
+		eyeNor /= (SSAA * SSAA);
+
+		float lambert = glm::clamp(glm::dot(eyeNor, lightVec), 0.06f, 1.0f);
+		framebuffer[index] = frameColor * lambert;
     }
 }
 
@@ -155,14 +169,14 @@ void render(const int w, const int h, Fragment *fragmentBuffer, glm::vec3 *frame
  * Called once at the beginning of the program to allocate memory.
  */
 void rasterizeInit(int w, int h) {
-    width = w;
-    height = h;
+    width = w * SSAA;
+    height = h * SSAA;
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
     cudaFree(dev_framebuffer);
-    cudaMalloc(&dev_framebuffer,   width * height * sizeof(glm::vec3));
-    cudaMemset(dev_framebuffer, 0, width * height * sizeof(glm::vec3));
+    cudaMalloc(&dev_framebuffer,   w * h * sizeof(glm::vec3));
+    cudaMemset(dev_framebuffer, 0, w * h * sizeof(glm::vec3));
     
 	cudaFree(dev_depth);
 	cudaMalloc(&dev_depth, width * height * sizeof(int));
@@ -646,16 +660,22 @@ void _vertexTransformAndAssembly(
 		VertexAttributePosition pos = primitive.dev_position[vid];
 		vertex.pos = MVP * glm::vec4(pos, 1);
 		vertex.pos /= vertex.pos.w * 2.0f;
-		vertex.pos += glm::vec4(0.5f);
-		vertex.pos *= glm::vec4(width, height, 1, 1);
+		vertex.pos.x = (vertex.pos.x + 0.5f) * width;
+		vertex.pos.y = (0.5f - vertex.pos.y) * height;
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arrays into the primitive array
-		vertex.dev_diffuseTex = primitive.dev_diffuseTex;
-		vertex.texcoord0 = primitive.dev_texcoord0[vid];
 		vertex.eyePos = glm::vec3(MV * glm::vec4(pos, 1));
 		vertex.eyeNor = glm::normalize(MV_normal * primitive.dev_normal[vid]);
-		vertex.color = glm::vec3(1);
+
+		if (primitive.dev_diffuseTex != NULL) {
+			vertex.dev_diffuseTex = primitive.dev_diffuseTex;
+			vertex.texcoord0 = primitive.dev_texcoord0[vid];
+			vertex.texWidth = primitive.diffuseTexWidth;
+			vertex.texHeight = primitive.diffuseTexHeight;
+		} else {
+			vertex.color = glm::vec3((float)vid / numVertices, (float)vid / numVertices, 1.0f - ((float)vid / numVertices));
+		}
 
 	}
 }
@@ -713,8 +733,42 @@ void scanline(int width, int height, int numPrimitives, Primitive* primitives, F
 						if (!locked) {
 							// Critical section
 							if (zdepth < depth[index]) {
-								fragments[index].color = glm::vec3(bary.x * prim.v[0].color +
-									bary.y * glm::vec3(prim.v[1].color) + bary.z * glm::vec3(prim.v[2].color));
+								if (prim.v[0].dev_diffuseTex) {
+									glm::vec2 UV = bary.x * prim.v[0].texcoord0 + bary.y * prim.v[1].texcoord0 + bary.z * prim.v[2].texcoord0;
+									int u = UV.x * prim.v[0].texWidth;
+									int v = UV.y * prim.v[0].texHeight;
+#if BILINEAR
+									glm::vec3 col00 = glm::vec3(
+										prim.v[0].dev_diffuseTex[(u + v * prim.v[0].texWidth) * 3],
+										prim.v[0].dev_diffuseTex[(u + v * prim.v[0].texWidth) * 3 + 1],
+										prim.v[0].dev_diffuseTex[(u + v * prim.v[0].texWidth) * 3 + 2]);
+									glm::vec3 col10 = glm::vec3(
+										prim.v[0].dev_diffuseTex[(u + 1 + v * prim.v[0].texWidth) * 3],
+										prim.v[0].dev_diffuseTex[(u + 1 + v * prim.v[0].texWidth) * 3 + 1],
+										prim.v[0].dev_diffuseTex[(u + 1 + v * prim.v[0].texWidth) * 3 + 2]);
+									glm::vec3 col01 = glm::vec3(
+										prim.v[0].dev_diffuseTex[(u + (v + 1) * prim.v[0].texWidth) * 3],
+										prim.v[0].dev_diffuseTex[(u + (v + 1) * prim.v[0].texWidth) * 3 + 1],
+										prim.v[0].dev_diffuseTex[(u + (v + 1) * prim.v[0].texWidth) * 3 + 2]);
+									glm::vec3 col11 = glm::vec3(
+										prim.v[0].dev_diffuseTex[(u + 1 + (v + 1) * prim.v[0].texWidth) * 3],
+										prim.v[0].dev_diffuseTex[(u + 1 + (v + 1) * prim.v[0].texWidth) * 3 + 1],
+										prim.v[0].dev_diffuseTex[(u + 1 + (v + 1) * prim.v[0].texWidth) * 3 + 2]);
+
+									glm::vec3 mix1 = glm::mix(col10, col00, UV.x);
+									glm::vec3 mix2 = glm::mix(col11, col01, UV.x);
+									fragments[index].color = glm::mix(mix2, mix1, UV.y) / 255.0f;
+#else
+									fragments[index].color = glm::vec3(
+										prim.v[0].dev_diffuseTex[(u + v * prim.v[0].texWidth) * 3],
+										prim.v[0].dev_diffuseTex[(u + v * prim.v[0].texWidth) * 3 + 1],
+										prim.v[0].dev_diffuseTex[(u + v * prim.v[0].texWidth) * 3 + 2]) / 255.0f;
+#endif // BILINEAR
+
+								} else {
+									fragments[index].color = glm::vec3(bary.x * prim.v[0].color +
+										bary.y * glm::vec3(prim.v[1].color) + bary.z * glm::vec3(prim.v[2].color));
+								}
 								fragments[index].eyeNor = glm::vec3(bary.x * prim.v[0].eyeNor +
 									bary.y * glm::vec3(prim.v[1].eyeNor) + bary.z * glm::vec3(prim.v[2].eyeNor));
 								depth[index] = zdepth;
@@ -779,10 +833,14 @@ void rasterize(uchar4* pbo, const glm::mat4& MVP, const glm::mat4& MV, const glm
 		(width, height, curPrimitiveBeginId, dev_primitives, dev_fragmentBuffer, dev_depth, mutex);
 
     // Copy depthbuffer colors into framebuffer
-	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
+	int w = width / SSAA;
+	int h = height / SSAA;
+	dim3 blockCountShrink2d((w - 1) / blockSize2d.x + 1,
+		(h - 1) / blockSize2d.y + 1);
+	render << <blockCountShrink2d, blockSize2d >> >(w, h, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
-    sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
+    sendImageToPBO<<<blockCountShrink2d, blockSize2d>>>(pbo, w, h, dev_framebuffer);
     checkCUDAError("copy render result to pbo");
 }
 

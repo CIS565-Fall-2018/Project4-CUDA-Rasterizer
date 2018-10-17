@@ -12,6 +12,8 @@
 #include <glm/glm.hpp>
 #include <util/utilityCore.hpp>
 
+#define BILINEAR 1
+#define SSAA 1
 struct AABB {
     glm::vec3 min;
     glm::vec3 max;
