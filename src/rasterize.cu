@@ -18,6 +18,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <device_launch_parameters.h>
+#include <thrust/partition.h>
+#include <thrust/execution_policy.h>
 
 namespace {
 
@@ -101,6 +103,7 @@ static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2Primitiv
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
+static Primitive *dev_primitives_copy = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
@@ -170,6 +173,17 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
 	}
 }
+
+struct cullpredicate
+{
+	__device__
+		bool operator()(const Primitive &primitive)
+	{
+		glm::vec3 normal = glm::cross(primitive.v[1].eyePos - primitive.v[0].eyePos, primitive.v[2].eyePos - primitive.v[0].eyePos);
+
+		return glm::dot(normal, glm::vec3(0,0,1)) > -0.1;
+	}
+};
 
 /**
  * Called once at the beginning of the program to allocate memory.
@@ -629,6 +643,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 	// 3. Malloc for dev_primitives
 	{
 		cudaMalloc(&dev_primitives, totalNumPrimitives * sizeof(Primitive));
+		cudaMalloc(&dev_primitives_copy, totalNumPrimitives * sizeof(Primitive));
 	}
 
 
@@ -837,6 +852,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	dim3 blockCount2d((width - 1) / blockSize2d.x + 1,
 		(height - 1) / blockSize2d.y + 1);
 
+	cudaMemcpy(dev_primitives_copy, dev_primitives, totalNumPrimitives * sizeof(Primitive), cudaMemcpyDeviceToDevice);
+
+
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
 
@@ -861,7 +879,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				_primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
 					(p->numIndices,
 						curPrimitiveBeginId,
-						dev_primitives,
+						dev_primitives_copy,
 						*p);
 				checkCUDAError("Primitive Assembly");
 
@@ -875,8 +893,15 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> > (width, height, dev_depth);
 
+	// Cull all the primitives facing away
+
+	Primitive *end = thrust::partition(thrust::device, dev_primitives_copy, dev_primitives_copy + totalNumPrimitives, cullpredicate());
+	cudaDeviceSynchronize();
+
+	int primitivesLeft = end - dev_primitives_copy;
+
 	// TODO: rasterize
-	rasterizeKernel << <blockCount2d, blockSize2d >> > (totalNumPrimitives, width, height, dev_fragmentBuffer, dev_primitives, dev_depth, mutex);
+	rasterizeKernel << <blockCount2d, blockSize2d >> > (primitivesLeft, width, height, dev_fragmentBuffer, dev_primitives_copy, dev_depth, mutex);
 
 
 	// Copy depthbuffer colors into framebuffer
