@@ -98,7 +98,17 @@ if (inside) {
 However, by forcing serialization of memory access, we force a loss of performance. In a dense scene with many overlapping primitives, we can expect severe framerate drops since we lose some of the advantage of parallelism. This is necessary for accurately rendering a scene with depth and avoiding any race conditions from the overlapping objects. The only optimization that comes to mind is comparing with the z-buffer first to avoid locking and then not needing it, and then comparing again in the critical section to avoid race conditions. Perhaps even shared memory can be used to pre-load the entire z-buffer to speed up access for dense scenes.  
   
   
+## Performance Analysis  
   
+### Rasterizer Block Size  
+  
+After taking a rough estimate of the framerate during runtime for three different gltf files under different rasterizer block size conditions, I determined that with the current implementation, the block size has little to no effect on the framerate in most cases. In the cases where there are many triangles and each take little screen space, there is some changes due to thoroughput, and higher overall framerate.  
+  
+![Block Size Perf](images/blockSize.png)
+  
+### Coloring and Motion  
+  
+Since the block size had little effect, I was curious about the effect of other factors, such as rendering of the normals versus textures and whether moving the scene around had significant impact.
   
   
 ### Credits
