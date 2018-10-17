@@ -21,6 +21,8 @@ In this project, I used CUDA to implement a simplified rasterized graphics pipel
   * Fragments to depth buffer
   * Fragment shading
   * Fragment to framebuffer writing
+* SSAA implemented
+* UV texture mapping with bilinear texture filtering and perspective correct texture coordinates
 
 ### Results
 
@@ -33,6 +35,11 @@ In this project, I used CUDA to implement a simplified rasterized graphics pipel
   <img src="/images/SSAA/truck.gif" width="45%">
   <img src="/images/SSAA/truck2.gif" width="45%"> <br />
   - Clearly, after implementing SSAA, the aliasing problem decreases. If you look carefully at the outline of the truck, the left one is more tooth-shaped.
+
+* Implementing UV texture mapping with [bilinear texture filtering](https://en.wikipedia.org/wiki/Bilinear_filtering#Sample_code) and [perspective correct texture coordinates](https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/perspective-correct-interpolation-vertex-attributes) <br />
+  <img src="/images/texture mapping/board.gif" width="45%">
+  <img src="/images/texture mapping/board1.gif" width="45%"> <br />
+  - After implementing these two features, we can see the difference. With the left original result, the perspective is weird and the texture resolution is not as good as the right one.
   
 
 
