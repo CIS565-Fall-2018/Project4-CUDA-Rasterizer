@@ -133,7 +133,7 @@ The raw data is from the NSight Performance Analysis tool.
   
   
   
-While in motion, the program spent more time in the rasterizer. Partly this is likely caused by the object moving closer to the camera, increasing the number of overlapping pixels needed to be scanned. The program spends a surprising amount of time in the rendering stage. While there seems to be less to do in the code, I can only assume accessing every fragment in memory, including those not actually containing anything, and copying to the frame buffer causes this slowdown.
+While in motion, the program spent more time in the rasterizer. Partly this is likely caused by the object moving closer to the camera, increasing the number of overlapping pixels needed to be scanned. The program spends a surprising amount of time in the rendering stage. While there seems to be less to do in the code, I can only assume accessing every fragment in memory, including those not actually containing anything, and copying to the frame buffer causes this slowdown. Texturing did have a slight effect on the average render time, which is at the highest max when both texturing and motion occur.
   
 ### Credits
 
