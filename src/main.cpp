@@ -9,6 +9,7 @@
 
 
 #include "main.hpp"
+#include <chrono>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYGLTF_LOADER_IMPLEMENTATION
@@ -50,9 +51,10 @@ int main(int argc, char **argv) {
 	}
 
 
-    frame = 0;
+    frame = 1;
     seconds = time(NULL);
     fpstracker = 0;
+
 
     // Launch CUDA/GL
     if (init(scene)) {
@@ -97,7 +99,7 @@ void mainLoop() {
 //---------RUNTIME STUFF---------
 //-------------------------------
 float scale = 1.0f;
-float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
+float x_trans = 0.0f, y_trans = 0.0f, z_trans = -1.0f;
 float x_angle = 0.0f, y_angle = 0.0f;
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -120,8 +122,22 @@ void runCuda() {
 	glm::mat4 MVP = P * MV;
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
-	rasterize(dptr, MVP, MV, MV_normal);
-    cudaGLUnmapBufferObject(pbo);
+
+	std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
+
+	rasterize(dptr, MVP, MV, MV_normal, renderMode);
+	
+	std::chrono::high_resolution_clock::time_point endTime = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double, std::milli> duro = endTime - startTime;
+	float elapsedTime = static_cast<decltype(elapsedTime)>(duro.count());
+	
+	avgFrameTime += elapsedTime;
+	if (frame % 100 == 0) {
+		printf("100 frames took avg %f milliseconds\n", avgFrameTime / 100);
+		avgFrameTime = 0;
+	}	
+	
+	cudaGLUnmapBufferObject(pbo);
 
     frame++;
     fpstracker++;
@@ -183,6 +199,8 @@ bool init(const tinygltf::Scene & scene) {
 
 	rasterizeSetBuffers(scene);
 
+	rasterizeSetTileBuffers();
+
     GLuint passthroughProgram;
     passthroughProgram = initShader();
 
@@ -214,7 +232,7 @@ void initCuda() {
     // Use device with highest Gflops/s
     cudaGLSetGLDevice(0);
 
-    rasterizeInit(width, height);
+    rasterizeInit(width, height, tilePixelSize);
 
     // Clean up on program exit
     atexit(cleanupCuda);
@@ -395,6 +413,6 @@ void mouseMotionCallback(GLFWwindow* window, double xpos, double ypos)
 
 void mouseWheelCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
-	const double s = 1.0;	// sensitivity
+	const double s = 0.1;	// sensitivity
 	z_trans += (float)(s * yoffset);
 }
