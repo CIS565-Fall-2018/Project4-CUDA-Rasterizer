@@ -1,10 +1,10 @@
 /**
- * @file      main.cpp
- * @brief     Main file for CUDA rasterizer. Handles CUDA-GL interop for display.
- * @authors   Skeleton code: Yining Karl Li, Kai Ninomiya, Shuai Shao (Shrek)
- * @date      2012-2016
- * @copyright University of Pennsylvania
- */
+* @file      main.cpp
+* @brief     Main file for CUDA rasterizer. Handles CUDA-GL interop for display.
+* @authors   Skeleton code: Yining Karl Li, Kai Ninomiya, Shuai Shao (Shrek)
+* @date      2012-2016
+* @copyright University of Pennsylvania
+*/
 
 
 
@@ -16,8 +16,17 @@
 #include <util/tiny_gltf_loader.h>
 
 //-------------------------------
+//---------RUNTIME STUFF---------
+//-------------------------------
+float scale = 1.0f;
+float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
+float x_angle = 0.0f, y_angle = 0.0f;
+int primitive_type = 0;
+
+//-------------------------------
 //-------------MAIN--------------
 //-------------------------------
+
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -78,7 +87,8 @@ void mainLoop() {
             seconds = seconds2;
         }
 
-        string title = "CIS565 Rasterizer | " + utilityCore::convertIntToString((int) fps) + " FPS";
+        string title = "CIS565 Rasterizer | " + utilityCore::convertIntToString((int) fps) + " FPS" +
+                       "; Z = " + utilityCore::convertIntToString((int) z_trans);
         glfwSetWindowTitle(window, title.c_str());
 
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
@@ -93,14 +103,6 @@ void mainLoop() {
     glfwDestroyWindow(window);
     glfwTerminate();
 }
-
-//-------------------------------
-//---------RUNTIME STUFF---------
-//-------------------------------
-float scale = 1.0f;
-float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
-float x_angle = 0.0f, y_angle = 0.0f;
-int primitive_type = 0;
 
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -128,6 +130,8 @@ void runCuda() {
 
     frame++;
     fpstracker++;
+    y_angle += 0.04f;
+
 }
 
 //-------------------------------
@@ -332,6 +336,9 @@ void errorCallback(int error, const char *description) {
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
+    } else if (key == GLFW_KEY_N && action == GLFW_RELEASE) {
+        primitive_type++;
+        if (primitive_type > 2) primitive_type = 0;
     }
 }
 
