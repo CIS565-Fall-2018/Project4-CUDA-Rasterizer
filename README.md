@@ -16,37 +16,24 @@ CUDA Rasterizer
   - Basic Lambert shading:
   - Line rasterization mode
   - Point rasterization mode
-  - UV texture mapping with perspective correct texture coordinatesbilinear texture
+  - UV texture mapping with perspective correct texture coordinates
   
 Far | Mid | Near
 ------|------|------
 ![](img/duck_small.png) | ![](img/duck_mid.png) | ![](img/duck_big.png)
  60Fps | 60Fps | 60Fps
-# DOF
-  ![](img/dof.png)
-  - 5000 iterations
+# Line rasterization mode
+  ![](img/duck_line.png)
+  - 60FPS
   
-# OBJ
-  ![](img/obj.png)
-  - 3000 iterations
+# Point rasterization mode
+  ![](img/duck_point.png)
+  - 60FPS
 
-# Multiply lights
-  ![](img/alll.png)
-  - 10000 iterations
+# UV texture mapping with perspective correct texture coordinates
+  ![](img/kart.png)
+  - 10FPS
 
-time cost to 5000 iterations
-
-time(secs)	|sort by material id	|store first intersections |  stream compaction | Time
---------------|---------|-------|---------|-------
-Diffuse|	0|	0 | 1| 6m54s
-Diffuse|	1|	0| 1|12m11s
-Diffuse|0 | 1| 1|5m33s
-
-# References
-- [ConcentricSampleDisk function](https://pub.dartlang.org/documentation/dartray/0.0.1/core/ConcentricSampleDisk.html)
-- [GPU gem3](https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_pref01.html)
-- [Schlick's approximation wiki](https://en.wikipedia.org/wiki/Schlick's_approximation)
-- some iterative solutions for binary search tree 
 
 ### Credits
 
