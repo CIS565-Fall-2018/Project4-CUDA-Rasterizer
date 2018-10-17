@@ -766,7 +766,7 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
     {
         Primitive primitive = dev_primitives[primitiveId];
 
-        PrimitiveType test = Point;
+        PrimitiveType test = Triangle;
         
         if (test == Triangle)
         {
