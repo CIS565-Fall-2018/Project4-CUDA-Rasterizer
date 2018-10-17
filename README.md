@@ -28,6 +28,13 @@ In this project, I used CUDA to implement a simplified rasterized graphics pipel
   <img src="/images/basic pipeline/triangle.gif" width="30%">
   <img src="/images/basic pipeline/box.gif" width="30%">
   <img src="/images/basic pipeline/duck.gif" width="30%">
+  
+* After implementing SSAA <br />
+  <img src="/images/SSAA/truck.gif" width="45%">
+  <img src="/images/SSAA/truck2.gif" width="45%"> <br />
+  - Clearly, after implementing SSAA, the aliasing problem decreases. If you look carefully at the outline of the truck, the left one is more tooth-shaped.
+  
+
 
 ### Credits
 
