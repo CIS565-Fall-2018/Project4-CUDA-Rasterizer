@@ -27,6 +27,8 @@ This is because the vertex behind the camera will be projected to the far end of
 
 ![picture credit derhass@stackoverflow](img/0.JPG)
 
+###### picture credit [derhass@stackoverflow](https://stackoverflow.com/users/2327517/derhass)
+
 As a restul, the primitive will potentially occupy more pixels, which will result in longer looping time in scan line rasterizer. If the the execution time for a kernel is too long, GPU will throw a kernel launch failure error. Tile based rasterizer will alleviate the problem in some cases, but can not solve it completely because when the primitives get large enough, every tile has to include them all, which will increase looping time in tile based rasterizer as well. To solve it, we need to do depth clipping and this requires a clipping stage and a clipping algorithm, which we do not have in our CUDA rasterizer. If you want to know more about clipping, check [this](https://stackoverflow.com/questions/41085117/why-does-gl-divide-gl-position-by-w-for-you-rather-than-letting-you-do-it-your) out.
 
 ---
