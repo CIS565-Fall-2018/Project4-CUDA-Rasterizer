@@ -53,16 +53,33 @@ SSAA has an significant, negative impact on performance. This is unsuprising, si
 
 ![](img/ssaa-comparison.png)
 
+The performance impact is further illustrated by the graph below. The flower model is used in this test with a `GRID_SIZE` of 2.
+
+![](img/ssaa-graph.png)
+
+The benefits of SSAA can be achieved with much higher performance by implementing [MSAA](https://en.wikipedia.org/wiki/Multisample_anti-aliasing). This special case of supersampling only upscales edges of the objects, where anti aliasing provides the largest benefit. Since the entire image is no longer being upscaled, the result is comparable to SSAA with significantly better performance. 
+
 #### Alternate Drawing Modes
 
 In addition to the typical `triangle` mode, `line` and `point` modes are also available. If enabled, the original vector graphic is reduced to solely its vertices (point mode). Line mode takes this one step further, connecting each vertex without filling triangle. Triangle mode uses the normal value for coloring, while all other modes are statically defined to be white. Without the need to fill the image, significantly fewer pixels need to be processed. This results in both point and line modes achieving much higher FPS than the normal triangle mode.
 
 ![](img/points-cow.png) ![](img/lines-cow.png)
 
-TODO: GRAPHS
+The graph below shows the difference in FPS across each of the three drawing modes while drawing the cow model. 
 
-## Resources
+![](img/draw-mode-graph.png)
+
+Line drawing may be further improved by calculating each pixel in parallel. Currently, one line is calculated per thread. Utilizing shared memory instead of global memory in all drawing modes is also likely to yield a significant performance benefit. 
+
+## Methodology
+
+When testing performance, the model being rendered was first zoomed to fill the screen. Once the proper size was reached, the FPS was calculated as the average over the next 10 seconds. All models used for testing and shown in the screenshots are available in the `gltf` directory. Unless otherwise specified, all toggleable features except the one being tested were disabled before each performance test. 
+
+## Resources & Credits
+
+ - [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
  - [OpenGL.org, Lambert lighting](https://www.opengl.org/sdk/docs/tutorials/ClockworkCoders/lighting.php)
+ - [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
  - [University of Pennsylvania, CIS 565, Skeleton Project](https://github.com/CIS565-Fall-2018/Project4-CUDA-Rasterizer)
  - [Wikipedia, Supersampling](https://en.wikipedia.org/wiki/Supersampling#Supersampling_patterns)
 
