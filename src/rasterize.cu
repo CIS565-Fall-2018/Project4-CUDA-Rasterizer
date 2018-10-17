@@ -17,8 +17,7 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
-#define BILINEAR 1
+#include <device_launch_parameters.h>
 
 namespace {
 
@@ -66,9 +65,6 @@ namespace {
 
 		glm::vec3 eyePos;	// eye space position used for shading
 		glm::vec3 eyeNor;
-		VertexAttributeTexcoord texcoord0;
-		TextureData* dev_diffuseTex;
-		int texWidth, texHeight;
 		// ...
 	};
 
@@ -103,15 +99,6 @@ namespace {
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
-
-static int width = 0;
-static int height = 0;
-static int screenDepth = 0;
-// For anti-aliasing
-static int screenWidth = 0;
-static int screenHeight = 0;
-static int aa = 2;
-
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
@@ -121,7 +108,11 @@ static float * dev_depth = NULL;	// you might need this buffer when doing depth 
 
 static int *mutex;
 
-static glm::vec3 lightDir = -glm::normalize(glm::vec3(1, -1, -1));
+static int width = 0;
+static int height = 0;
+static int originalWidth = 0;
+static int originalHeight = 0;
+static int antialiasing = 2;
 
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
@@ -134,22 +125,9 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image, int aaSize, int
 
 	if (x < w && y < h) {
 		glm::vec3 color;
-
-		for (int i = 0; i < aaSize; i++) {
-			for (int j = 0; j < aaSize; j++) {
-				int tempIndex = ((aaSize * x) + i) + (((aaSize * y) + j) * largeW);
-				color.x += glm::clamp(image[tempIndex].x, 0.0f, 1.0f) * 255.0;
-				color.y += glm::clamp(image[tempIndex].y, 0.0f, 1.0f) * 255.0;
-				color.z += glm::clamp(image[tempIndex].z, 0.0f, 1.0f) * 255.0;
-			}
-		}
-
-		int aaSize2 = aaSize * aaSize;
-		color /= aaSize2;
-
-		//color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-		//color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-		//color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+		color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
+		color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
+		color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
 		// Each thread writes one pixel location in the texture (textel)
 		pbo[index].w = 0;
 		pbo[index].x = color.x;
@@ -162,22 +140,25 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image, int aaSize, int
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, const glm::vec3 light) {
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 	int index = x + (y * w);
 
+	const int numLights = 2;
+	glm::vec3 lights[numLights] = { glm::normalize(glm::vec3(-1,-1,-1)), glm::normalize(glm::vec3(1,1,1)) };
+
 	if (x < w && y < h) {
-		//framebuffer[index] = fragmentBuffer[index].color;
+		framebuffer[index] = glm::vec3(0, 0, 0);
+
+		for (int i = 0; i < numLights; ++i) {
+			float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, lights[i]), 0.f, 1.f);
+
+			framebuffer[index] += fragmentBuffer[index].color * lambert;
+		}
 
 		// TODO: add your fragment shader code here
-		//framebuffer[index] = glm::vec3((float)x/w, (float)y/h, 0);
-		//framebuffer[index] = glm::vec3((float) y / h, (float) x / w, 0);
 
-		float lambert = glm::clamp(glm::dot(fragmentBuffer[index].eyeNor, light), 0.f, 1.f);
-
-		framebuffer[index] = fragmentBuffer[index].color * lambert;
-		//framebuffer[index] = fragmentBuffer[index].color + 0.15f;
 	}
 }
 
@@ -185,12 +166,10 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, cons
  * Called once at the beginning of the program to allocate memory.
  */
 void rasterizeInit(int w, int h) {
-	screenWidth = w;
-	screenHeight = h;
-
-	width = aa * screenWidth;
-	height = aa * screenHeight;
-	screenDepth = INT_MAX;
+	originalWidth = w;
+	originalHeight = h;
+	width = antialiasing * originalWidth;
+	height = antialiasing * originalHeight;
 
 	cudaFree(dev_fragmentBuffer);
 	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
@@ -892,10 +871,10 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 
 	// Copy depthbuffer colors into framebuffer
-	render << <blockCount2d, blockSize2d >> > (width, height, dev_fragmentBuffer, dev_framebuffer, lightDir);
+	render << <blockCount2d, blockSize2d >> > (width, height, dev_fragmentBuffer, dev_framebuffer);
 	checkCUDAError("fragment shader");
 	// Copy framebuffer into OpenGL buffer for OpenGL previewing
-	sendImageToPBO << <blockCount2d, blockSize2d >> > (pbo, screenWidth, screenHeight, dev_framebuffer, aa, width);
+	sendImageToPBO << <blockCount2d, blockSize2d >> > (pbo, originalWidth, originalHeight, dev_framebuffer, antialiasing, width);
 	checkCUDAError("copy render result to pbo");
 }
 
