@@ -108,8 +108,32 @@ After taking a rough estimate of the framerate during runtime for three differen
   
 ### Coloring and Motion  
   
-Since the block size had little effect, I was curious about the effect of other factors, such as rendering of the normals versus textures and whether moving the scene around had significant impact.
+Since the block size had little effect, I was curious about the effect of other factors, such as rendering of the normals versus textures and whether moving the scene around had significant impact. The impact on time per function as a percent of overall CUDA run time is as follows:
   
+![FunctionTime](images/funcTime.png)  
+  
+The raw data is from the NSight Performance Analysis tool.  
+  
+*Duck w/ Paint Normals, Still:*  
+  
+![Duck, Normals, Still](images/duck_normals_analysis1_1.PNG) ![Duck, Normals, Still](images/duck_normals_analysis1_2.PNG)
+    
+*Duck w/ Paint Normals, Moving:*  
+  
+![Duck, Normals, Moving](images/duck_normals_analysis2_1.PNG) ![Duck, Normals, Moving](images/duck_normals_analysis2_2.PNG)
+  
+  
+*Duck w/ Texture, Still:*  
+  
+![Duck, Texture, Still](images/duck_texture_analysis1_1.PNG) ![Duck, Texture, Still](images/duck_texture_analysis1_2.PNG)
+    
+*Duck w/ Paint Texture, Moving:*  
+  
+![Duck, Texture, Moving](images/duck_texture_analysis2_1.PNG) ![Duck,Texture, Moving](images/duck_texture_analysis2_2.PNG)  
+  
+  
+  
+While in motion, the program spent more time in the rasterizer. Partly this is likely caused by the object moving closer to the camera, increasing the number of overlapping pixels needed to be scanned. The program spends a surprising amount of time in the rendering stage. While there seems to be less to do in the code, I can only assume accessing every fragment in memory, including those not actually containing anything, and copying to the frame buffer causes this slowdown.
   
 ### Credits
 
