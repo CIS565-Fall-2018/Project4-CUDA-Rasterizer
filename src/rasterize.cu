@@ -28,6 +28,9 @@ namespace {
 
 	typedef unsigned char BufferByte;
 
+
+#define BYTES_PER_PIXEL 3
+
 #define NUM_INSTANCES 1
 
 #define AA_SUPER_SAMPLE
@@ -35,6 +38,9 @@ namespace {
 
 #define SSAA_LEVEL 1
 #define MSAA_LEVEL 2
+
+#define NO_INTERPOLATION
+#define BI_LINEAR_INTERPOLATION
 
 	enum PrimitiveType
 	{
@@ -562,7 +568,9 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 
 						if (mat.values.find("diffuse") != mat.values.end()) {
 							std::string diffuseTexName = mat.values.at("diffuse").string_value;
-							if (scene.textures.find(diffuseTexName) != scene.textures.end()) {
+							printf("Diffuse Texture name = %s\n", diffuseTexName.c_str());
+							if (scene.textures.find(diffuseTexName) != scene.textures.end()) 
+							{
 								const tinygltf::Texture &tex = scene.textures.at(diffuseTexName);
 								if (scene.images.find(tex.source) != scene.images.end()) {
 									const tinygltf::Image &image = scene.images.at(tex.source);
@@ -577,6 +585,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 									checkCUDAError("Set Texture Image data");
 								}
 							}
+
 						}
 
 						// TODO: write your code for other materails
@@ -693,6 +702,10 @@ void _vertexTransformAndAssembly(PrimitiveDevBufPointers primitive, glm::mat4 MV
 			{
 				primitive.dev_verticesOut[vid * numInstances + instanceId].texcoord0 = primitive.dev_texcoord0[vid];
 			}
+			else
+			{
+				primitive.dev_verticesOut[vid * numInstances + instanceId].color = glm::clamp(glm::vec3(outPos), glm::vec3(0.f), glm::vec3(1.f));
+			}
 			
 		}
 	}
@@ -734,7 +747,6 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 					dev_primitives[primitiveIndexPos].diffuseTexHeight = 0;
 				}
 			}
-
 		}
 	}
 }
@@ -742,9 +754,8 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 __global__
 void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer, float* dev_depth, unsigned int* mutexLock) 
 {
-	const int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-	const int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-	const int primitiveId = x + (y * width);
+	// primitive id
+	const int primitiveId = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if (primitiveId < totalNumPrimitives)
 	{
@@ -768,16 +779,111 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 
 			const AABB bounds = getAABBForTriangle(triangle);
 
-			// Clamp TO Screen
+			// Clamp To Screen
 			float minX = glm::clamp(bounds.min[0], 0.f, width - 1.f);
 			float maxX = glm::clamp(bounds.max[0], 0.f, width - 1.f);
 			float minY = glm::clamp(bounds.min[1], 0.f, height - 1.f);
 			float maxY = glm::clamp(bounds.max[1], 0.f, height - 1.f);
 
-			for (int row = minY; row <= maxY; ++row)
+			const int pixelIncrement = [&]
 			{
-				for (int col = minX; col <= maxX; ++col)
+#ifdef AA_MULTI_SAMPLE
+				return MSAA_LEVEL;
+#endif // AA_MULTI_SAMPLE
+				return 1;
+			}();
+
+			for (int row = minY; row <= maxY; row+=pixelIncrement)
+			{
+				for (int col = minX; col <= maxX; col+=pixelIncrement)
 				{
+
+#ifdef AA_MULTI_SAMPLE
+
+					bool isInside = false;
+
+					const int centerPixelIndex = (col + MSAA_LEVEL / 2) + (row * MSAA_LEVEL / 2) * width;
+					const glm::vec2 centerPixelPos((col + MSAA_LEVEL / 2), (row * MSAA_LEVEL / 2));
+					const glm::vec3 centerBaryCoord = calculateBarycentricCoordinate(triangle, centerPixelPos);
+
+					for (int subSampleX = 0; subSampleX < MSAA_LEVEL; ++subSampleX)
+					{
+						for (int subSampleY = 0; subSampleY < MSAA_LEVEL; ++subSampleY)
+						{
+							
+							const glm::vec2 currPosSubSample(col + subSampleX + subSampleY, row);
+							// Calculate BaryCentric coordinates
+							subSampleBarCoord[subSampleX][subSampleY] = calculateBarycentricCoordinate(triangle, currPosSubSample);
+
+							// Check if point is inside triangle
+							const bool subSampleHit = isBarycentricCoordInBounds(subSampleBarCoord[subSampleX][subSampleY]);
+							subSubSampleHit[subSampleX][subSampleY] = subSampleHit;
+							if (subSampleHit)
+							{
+								isInside = true;
+							}
+						}
+					}
+
+					if (isInside)
+					{
+
+						// 1. Sample the center pixel
+						glm::vec3 centerPixelColor(0.f);
+
+						bool isSet;
+						do {
+							isSet = (atomicCAS(&mutexLock[centerPixelIndex], 0, 1) == 0);
+							if (isSet) 
+							{
+								if (currDepth < dev_depth[centerPixelIndex])
+								{
+									dev_fragmentBuffer[centerPixelIndex].eyeNor = (centerBaryCoord.x * v1.eyeNor) + (centerBaryCoord.y * v2.eyeNor) + (centerBaryCoord.z * v3.eyeNor);
+									dev_fragmentBuffer[centerPixelIndex].eyePos = (centerBaryCoord.x * v1.eyePos) + (centerBaryCoord.y * v2.eyePos) + (centerBaryCoord.z * v3.eyePos);
+
+									if (dev_diffuseTex != NULL)
+									{
+										glm::vec2 textureCoord = (centerBaryCoord.x * v1.texcoord0) + (centerBaryCoord.y * v2.texcoord0) + (centerBaryCoord.z * v3.texcoord0);
+										textureCoord = glm::vec2(textureCoord.x * textureWidth, textureCoord.y * textureHeight);
+
+										textureCoord = glm::clamp(textureCoord, glm::vec2(0.f), glm::vec2(textureWidth - 1, textureHeight - 1));
+
+										// Apparently there are 3 bytes per pixel based on the texture array size and texture size.
+										const int startPixelIndex = int(textureCoord.x + textureCoord.y * textureWidth) * 3;
+										float r = dev_diffuseTex[startPixelIndex];
+										float g = dev_diffuseTex[startPixelIndex + 1];
+										float b = dev_diffuseTex[startPixelIndex + 2];
+										centerPixelColor = glm::vec3(r, g, b) / 255.f;
+										dev_fragmentBuffer[pixelIndex].color = centerPixelColor;
+									}
+									else
+									{
+										centerPixelColor = glm::vec3(1.0f);// (baryCoord.x * v1.color) + (baryCoord.y * v2.color) + (baryCoord.z * v3.color);
+										dev_fragmentBuffer[centerPixelIndex].color = centerPixelColor;
+									}
+									dev_depth[centerPixelIndex] = currDepth;
+								}
+							}
+							if (isSet) 
+							{
+								mutexLock[centerPixelIndex] = 0;
+							}
+						} while (!isSet);
+
+						// 2. Do a depth test for all the remaining subSamples and update framebuffer
+
+
+						for (int subSampleX = 0; subSampleX < MSAA_LEVEL; ++subSampleX)
+						{
+							for (int subSampleY = 0; subSampleY < MSAA_LEVEL; ++subSampleY)
+							{
+								const glm::vec2 currPosSubSample(col + subSampleX + subSampleY, row);
+
+							}
+						}
+					}
+
+#else
 					const int pixelIndex = col + row * width;
 					const glm::vec2 currPos(col, row);
 
@@ -801,26 +907,46 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 								{
 									dev_fragmentBuffer[pixelIndex].eyeNor = (baryCoord.x * v1.eyeNor) + (baryCoord.y * v2.eyeNor) + (baryCoord.z * v3.eyeNor);
 									dev_fragmentBuffer[pixelIndex].eyePos = (baryCoord.x * v1.eyePos) + (baryCoord.y * v2.eyePos) + (baryCoord.z * v3.eyePos);
-									
+
 									if (dev_diffuseTex != NULL)
 									{
-										glm::vec2 textureCoord = (baryCoord.x * v1.texcoord0) + (baryCoord.y * v2.texcoord0) + (baryCoord.z * v3.texcoord0);
+										glm::vec2 textureCoord = baryCoord[0] * v1.texcoord0 + baryCoord[1] * v2.texcoord0 + baryCoord[2] * v3.texcoord0;
 										textureCoord = glm::vec2(textureCoord.x * textureWidth, textureCoord.y * textureHeight);
 
-										textureCoord = glm::clamp(textureCoord, glm::vec2(0.f), glm::vec2(textureWidth - 1, textureHeight - 1));
+										const int u = int(textureCoord.x);
+										const int v = int(textureCoord.y);
 
-										// Apparently there are 3 bytes per pixel based on the texture array size and texture size.
-										const int startPixelIndex = int(textureCoord.x + textureCoord.y * textureWidth) * 3;
-										float r = dev_diffuseTex[startPixelIndex];
-										float g = dev_diffuseTex[startPixelIndex + 1];
-										float b = dev_diffuseTex[startPixelIndex + 2];
-										dev_fragmentBuffer[pixelIndex].color = glm::vec3(r, g, b) / 255.f;
+#ifdef BI_LINEAR_INTERPOLATION
+										const glm::vec2 mixRatio(glm::fract(textureCoord));
+
+										int sampleIndex = (u +  v * textureWidth) * BYTES_PER_PIXEL;
+										const glm::vec3 sample1 = glm::vec3(dev_diffuseTex[sampleIndex], dev_diffuseTex[sampleIndex + 1], dev_diffuseTex[sampleIndex + 2]);
+
+										sampleIndex = (u + 1 +  v * textureWidth) * BYTES_PER_PIXEL;
+										const glm::vec3 sample2 = glm::vec3(dev_diffuseTex[sampleIndex], dev_diffuseTex[sampleIndex + 1], dev_diffuseTex[sampleIndex + 2]);
+
+										sampleIndex = (u +  (v + 1) * textureWidth) * BYTES_PER_PIXEL;
+										const glm::vec3 sample3 = glm::vec3(dev_diffuseTex[sampleIndex], dev_diffuseTex[sampleIndex + 1], dev_diffuseTex[sampleIndex + 2]);
+
+										sampleIndex = (u + 1 +  (v + 1) * textureWidth) * BYTES_PER_PIXEL;
+										const glm::vec3 sample4 = glm::vec3(dev_diffuseTex[sampleIndex], dev_diffuseTex[sampleIndex + 1], dev_diffuseTex[sampleIndex + 2]);
+
+										const glm::vec3 mixInX = glm::mix(sample2, sample4, mixRatio.x);
+										const glm::vec3 mixInY = glm::mix(sample1, sample3, mixRatio.x);
+
+										dev_fragmentBuffer[pixelIndex].color = glm::mix(mixInX, mixInY, mixRatio.y) / 255.f;
+
+#else
+										const int startPixelIndex = int(u +  v * textureWidth) * BYTES_PER_PIXEL;
+										const glm::vec3 sampledColor = glm::vec3(dev_diffuseTex[startPixelIndex], dev_diffuseTex[startPixelIndex + 1], dev_diffuseTex[startPixelIndex + 2]);
+										dev_fragmentBuffer[pixelIndex].color = sampledColor / 255.f;
+#endif
 									}
 									else
 									{
-										dev_fragmentBuffer[pixelIndex].color = glm::vec3(1.0f);// (baryCoord.x * v1.color) + (baryCoord.y * v2.color) + (baryCoord.z * v3.color);
+										dev_fragmentBuffer[pixelIndex].color = (baryCoord.x * v1.color) + (baryCoord.y * v2.color) + (baryCoord.z * v3.color);
 									}
-									
+
 									dev_depth[pixelIndex] = currDepth;
 								}
 							}
@@ -831,6 +957,9 @@ void _rasterizePrimitive(int width, int height, int totalNumPrimitives, Primitiv
 						} while (!isSet);
 
 					}
+#endif
+					
+					
 				}
 			}
 		}
@@ -938,10 +1067,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	dim3 blockAACount2d((originalWidth  - 1) / blockSize2d.x + 1,
 		(originalHeight - 1) / blockSize2d.y + 1);
 
-
 	dim3 numThreadsPerBlock(128);
 	dim3 blocksPrimitives((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
-
 
 	// Execute your rasterization pipeline here
 	// (See README for rasterization pipeline outline.)
