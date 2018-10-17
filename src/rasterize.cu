@@ -18,7 +18,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define PAINT_NORMALS 1
+#define PAINT_NORMALS 0
 #define NO_LIGHTING 1
 #define WIREFRAME_MODE 0
 #define POINT_CLOUD_MODE 0
