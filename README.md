@@ -39,7 +39,7 @@ In this project, I used CUDA to implement a simplified rasterized graphics pipel
 * Implementing UV texture mapping with [bilinear texture filtering](https://en.wikipedia.org/wiki/Bilinear_filtering#Sample_code) and [perspective correct texture coordinates](https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/perspective-correct-interpolation-vertex-attributes) <br />
   <img src="/images/texture mapping/board.gif" width="45%">
   <img src="/images/texture mapping/board1.gif" width="45%"> <br />
-  - After implementing these two features, we can see the difference. With the left original result, the perspective is weird and the texture resolution is not as good as the right one.
+  - After implementing these two features, we can see the difference. With the left original result, the perspective is weird and the texture resolution is not as good as the right one. The right result looks much more comfortable.
   
 
 
