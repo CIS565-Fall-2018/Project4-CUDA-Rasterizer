@@ -95,7 +95,39 @@ bool isBarycentricCoordInBounds(const glm::vec3 barycentricCoord) {
  */
 __host__ __device__ static
 float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3]) {
-    return -(barycentricCoord.x * tri[0].z
+    return (barycentricCoord.x * tri[0].z
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
+}
+
+__host__ __device__ static
+float perspectiveCorrectZ(const glm::vec3 vertices[3], const glm::vec3 &barycentric) {
+    float sum = (barycentric[0] / vertices[0][2]) + (barycentric[1] / vertices[1][2]) + (barycentric[2] / vertices[2][2]);
+    return 1.0 / sum;
+}
+
+__host__ __device__ static
+glm::vec3 perspectiveCorrectInterpolation(const glm::vec3 vertices[3], const float &z, const glm::vec3 values[3], const glm::vec3 &barycentric) {
+    glm::vec3 sum = (barycentric[0] * values[0] / vertices[0][2])
+        + (barycentric[1] * values[1] / vertices[1][2])
+        + (barycentric[2] * values[2] / vertices[2][2]);
+    return sum * z;
+}
+
+__host__ __device__ static
+int convert2Dto1D(const int x, const int y, const int width) {
+    return x + (y * width);
+}
+
+/**
+* Handy-dandy hash function that provides seeds for random number generation.
+*/
+__host__ __device__ inline unsigned int utilhash(unsigned int a) {
+    a = (a + 0x7ed55d16) + (a << 12);
+    a = (a ^ 0xc761c23c) ^ (a >> 19);
+    a = (a + 0x165667b1) + (a << 5);
+    a = (a + 0xd3a2646c) ^ (a << 9);
+    a = (a + 0xfd7046c5) + (a << 3);
+    a = (a ^ 0xb55a4f09) ^ (a >> 16);
+    return a;
 }
