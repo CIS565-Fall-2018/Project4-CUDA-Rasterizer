@@ -5,17 +5,38 @@ CUDA Rasterizer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
 
-### (TODO: Your README)
+* Xinyu Lin
+[Linkedin](https://www.linkedin.com/in/xinyu-lin-138352125/)
+* Tested on: Windows 10, Intel(R) Core(TM) i7-6700HQ CPU@2.60GHz, 16GB, GTX960M(Private Computer)
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+
+# Features:
+- **Basic features**
+  - Basic Lambert shading:
+  - Line rasterization mode
+  - Point rasterization mode
+  - UV texture mapping with perspective correct texture coordinates
+  
+Far | Mid | Near
+------|------|------
+![](img/duck_small.png) | ![](img/duck_mid.png) | ![](img/duck_big.png)
+ 60Fps | 60Fps | 60Fps
+# Line rasterization mode
+  ![](img/duck_line.png)
+  - 60FPS
+  
+# Point rasterization mode
+  ![](img/duck_point.png)
+  - 60FPS
+
+# UV texture mapping with perspective correct texture coordinates
+  ![](img/kart.png)
+  - 10FPS
 
 
 ### Credits
 
 * [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
 * [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
+
