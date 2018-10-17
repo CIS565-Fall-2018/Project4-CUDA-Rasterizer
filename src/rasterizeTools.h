@@ -109,3 +109,17 @@ float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3])
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
 }
+
+__host__ __device__ static
+float perspCorrectZ(const glm::vec3 vertices[3], const glm::vec3 &barycentric) {
+	float sum = (barycentric[0] / vertices[0][2]) + (barycentric[1] / vertices[1][2]) + (barycentric[2] / vertices[2][2]);
+	return 1.0 / sum;
+}
+
+__host__ __device__ static
+glm::vec3 perspCorrectInterp(const glm::vec3 vertices[3], const float &z, const glm::vec3 values[3], const glm::vec3 &barycentric) {
+	glm::vec3 sum = (barycentric[0] * values[0] / vertices[0][2])
+		+ (barycentric[1] * values[1] / vertices[1][2])
+		+ (barycentric[2] * values[2] / vertices[2][2]);
+	return sum * z;
+}
