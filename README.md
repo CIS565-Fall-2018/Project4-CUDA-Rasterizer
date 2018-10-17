@@ -19,6 +19,18 @@ Analysis
 
 ---
 
+## 0. First thing first
+
+### Program will crash when mesh went behind the camera
+
+This is because the vertex behind the camera will be projected to the far end of the clip space as shown in the following picture. 
+
+![picture credit derhass@stackoverflow](img/0.JPG)
+
+As a restul, the primitive will potentially occupy more pixels, which will result in longer looping time in scan line rasterizer. If the the execution time for a kernel is too long, GPU will throw a kernel launch failure error. Tile based rasterizer will alleviate the problem in some cases, but can not solve it completely because when the primitives get large enough, every tile has to include them all, which will increase looping time in tile based rasterizer as well. To solve it, we need to do depth clipping and this requires a clipping stage and a clipping algorithm, which we do not have in our CUDA rasterizer. If you want to know more about clipping, check [this](https://stackoverflow.com/questions/41085117/why-does-gl-divide-gl-position-by-w-for-you-rather-than-letting-you-do-it-your) out.
+
+---
+
 ## 1. Checkerboard Scene 
 
 ### overview
@@ -213,3 +225,5 @@ But there is something new worth noticing. This is the only scene in all the fiv
 
 * [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
 * [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
+* [derhass@stackoverflow](https://stackoverflow.com/questions/41085117/why-does-gl-divide-gl-position-by-w-for-you-rather-than-letting-you-do-it-your)
+* [fabian's a trip through the graphics pipeline](https://fgiesen.wordpress.com/2011/07/06/a-trip-through-the-graphics-pipeline-2011-part-6/)
