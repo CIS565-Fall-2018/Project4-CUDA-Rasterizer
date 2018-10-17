@@ -15,7 +15,7 @@ Analysis
 
 * For shared memory in tile based rasterizer, primitive bucket size is 256 unchanged.
 
-* Rendering time is measured in frame per second, so higher is better.
+* Rendering time is measured in frame per second, higher is better.
 
 ---
 
