@@ -19,7 +19,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <device_launch_parameters.h>
 
-#define SSAA 2
+#define SSAA 0
 
 namespace {
 
