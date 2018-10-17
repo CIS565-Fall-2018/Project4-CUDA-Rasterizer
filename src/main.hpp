@@ -51,7 +51,7 @@ int width = 800;
 int height = 800;
 
 int renderMode = 1; // 0 for regular, 1 for tile-based rendering parallizing on tiles, 2 for tile-based rendering parallizing primitives
-int tilePixelSize = 16;
+int tilePixelSize = 8;
 
 float avgFrameTime;
 

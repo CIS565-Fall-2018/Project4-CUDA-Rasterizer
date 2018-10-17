@@ -156,6 +156,8 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     if (x < w && y < h) {
 		float diffuseFactor = fmaxf(0.0f, glm::dot(fragmentBuffer[index].eyeNor, fragmentBuffer[index].eyeLightDir));
 		framebuffer[index] = fragmentBuffer[index].color * diffuseFactor;
+		//framebuffer[index] = fragmentBuffer[index].color;
+		//framebuffer[index] = glm::normalize(fragmentBuffer[index].eyeNor);
 
 		// TODO: add your fragment shader code here
 		// compute diffuse color using Blinn or BlinnPhong
