@@ -21,7 +21,7 @@ Analysis
 
 ## 0. First thing first
 
-### Program will crash when mesh went behind the camera
+### Program will crash when mesh goes behind the camera
 
 This is because the vertex behind the camera will be projected to the far end of the clip space as shown in the following picture. 
 
