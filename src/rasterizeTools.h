@@ -107,3 +107,11 @@ T BCInterpolate(glm::vec3 bc, T v0, T v1, T v2)
 	return bc.x * v0 + bc.y * v1 + bc.z * v2;
 }
 
+
+__host__ __device__ static
+glm::vec2 PCBCInterpolatetexcoord(glm::vec3 bc, float p0, float p1, float p2, glm::vec2 t0, glm::vec2 t1, glm::vec2 t2)
+{
+	glm::vec2 tz = bc.x * t0 / p0 + bc.y * t1 / p1 + bc.z * t2 / p2;
+	float cz = bc.x / p0 + bc.y / p1 + bc.z / p2;
+	return tz / cz;
+}
