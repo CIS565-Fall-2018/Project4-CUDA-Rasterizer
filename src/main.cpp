@@ -144,7 +144,8 @@ void runCuda() {
 		autoRotateAngle = 0.0f;
 	}
 
-	glm::mat4 autoRotateMat = glm::rotate(autoRotateAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+	//glm::mat4 autoRotateMat = glm::rotate(autoRotateAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+	glm::mat4 autoRotateMat = glm::rotate(0.f, glm::vec3(0.0f, 1.0f, 0.0f));
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
 	rasterize(dptr, MVP, MV, MV_normal, renderMode, autoRotateMat, bloomEffect);

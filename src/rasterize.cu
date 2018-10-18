@@ -21,8 +21,7 @@
 #define TEXTURE 1
 #define CORRECT_INTERP 1 
 #define TEXTURE_BILINEAR 0
-#define DEBUG_NORM 0
-#define DEBUG_Z 0
+
 #define DOWNSCALERATIO 3
 
 namespace {
@@ -247,17 +246,15 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer,
 				f.color = glm::vec3(0.f);
 			}
 #endif	
-
-#if !DEBUG_Z && !DEBUG_NORM
-			glm::vec3 lightDir = glm::normalize(lightPos - f.eyePos);
+			
+			glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.2f, 0.7f) - f.eyePos);
+			//glm::vec3 lightDir = glm::normalize(lightPos - f.eyePos);
 			float lambert = glm::dot(lightDir, f.eyeNor);
-			float ambient = 0.1f;
-			float light_exp = 3.0f;
+			float ambient = 0.3f;
+			float light_exp = 1.0f;
 			lambert = lambert * light_exp + ambient;
 			framebuffer[index] = f.color * lambert;
-#else
-			framebuffer[index] = f.color;
-#endif
+
 		}
 		//for wireframe and points render mode, pass the color
 		else if (renderMode == RenderMode::Wireframe || renderMode == RenderMode::Points)
@@ -428,8 +425,9 @@ void brightnessFilter(int w, int h, glm::vec3 * framebufferIn, glm::vec3 * frame
 		//calculate brightness of this frame buffer
 		float brightness = f_in.r * 0.2126f + f_in.g * 0.7152f + f_in.b * 0.0722f;
 		//framebufferOut[index] = brightness * f_in;
-		brightness /= 2.0f;
-		framebufferOut[index] = glm::vec3(brightness);
+		//brightness /= 2.0f;
+		//framebufferOut[index] = glm::vec3(brightness);
+		framebufferOut[index] = brightness * f_in;
 	}
 }
 
@@ -453,7 +451,7 @@ void bloomCombineFramebuffers(int w, int h,
 		glm::vec3 side_col = sideFramebuffer[sideIdx];
 
 		//combination factor
-		float k = 1.0f;
+		float k = 1.2f;
 		//comine color and write to output
 		framebufferOut[mainIdx] = main_col + k * side_col;
 	}
@@ -985,22 +983,39 @@ void _vertexTransformAndAssembly(
 
 		// TODO: Apply vertex assembly here
 		// Assemble all attribute arraies into the primitive array
+		
 		VertexOut& thisDevVertexOut = primitive.dev_verticesOut[vid];
-		//multiply model-view-projective matrix
-		glm::vec4 worldSpacePos = MVP * _autoRotateMat4* glm::vec4(primitive.dev_position[vid], 1.0f);
-		//Projective divide
-		glm::vec4 NDCpos = worldSpacePos * (1.0f / worldSpacePos.w);
-		//transform into pixels
-		glm::vec4 PixelPos = glm::vec4(
-			(NDCpos.x + 1.0f) * (float)width / 2.0f,
-			(1.0f - NDCpos.y) * (float)height / 2.0f,
-			NDCpos.z,
-			NDCpos.w);
-		//write into vertexout struct
-		thisDevVertexOut.pos = PixelPos;
-		//Eye space pos
-		glm::vec3 eyeSpacePos = glm::vec3(MV * _autoRotateMat4 *glm::vec4(primitive.dev_position[vid], 1.0f));
-		thisDevVertexOut.eyePos = eyeSpacePos;
+		////multiply model-view-projective matrix
+		//glm::vec4 worldSpacePos = MVP * _autoRotateMat4* glm::vec4(primitive.dev_position[vid], 1.0f);
+		////Projective divide
+		//glm::vec4 NDCpos = worldSpacePos * (1.0f / worldSpacePos.w);
+		////transform into pixels
+		//glm::vec4 PixelPos = glm::vec4(
+		//	(NDCpos.x + 1.0f) * (float)width / 2.0f,
+		//	(1.0f - NDCpos.y) * (float)height / 2.0f,
+		//	NDCpos.z,
+		//	NDCpos.w);
+		////write into vertexout struct
+		//thisDevVertexOut.pos = PixelPos;
+		////Eye space pos
+		//glm::vec3 eyeSpacePos = glm::vec3(MV * _autoRotateMat4 *glm::vec4(primitive.dev_position[vid], 1.0f));
+		//thisDevVertexOut.eyePos = eyeSpacePos;
+
+
+		int index = vid;
+		glm::vec4 vPos = glm::vec4(primitive.dev_position[index], 1.0f);
+		glm::vec4 vEyePos = MV * vPos;
+		thisDevVertexOut.eyePos = glm::vec3(vEyePos);
+
+		vPos = MVP * vPos;
+		vPos /= vPos.w;
+		vPos.x = 0.5f * (float)width * (vPos.x + 1.0f);
+		vPos.y = 0.5f * (float)height * (1.0f - vPos.y);
+		vPos.z = -vPos.z;
+
+		thisDevVertexOut.pos = vPos;
+
+
 		//Eye space normal
 		glm::vec3 eyeSpaceNormal = glm::normalize(MV_normal * glm::mat3(_autoRotateMat4) *primitive.dev_normal[vid]);
 		thisDevVertexOut.eyeNor = eyeSpaceNormal;
@@ -1374,14 +1389,6 @@ void rasterizeFill(int numPrimitives, int curPrimitiveBeginId, Primitive* primit
 #endif
 
 
-									/***** Debug views handling ****/
-#if DEBUG_Z
-									f.color = glm::abs(glm::vec3(1.f - baryDepth));
-
-#endif
-#if DEBUG_NORM
-									f.color = f.eyeNor;
-#endif
 
 									/***** Texture handling ****/
 #if TEXTURE
