@@ -1,18 +1,48 @@
 CUDA Rasterizer
 ===============
 
-[CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
-
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-	* (TODO) [LinkedIn](), [personal website](), [twitter](), etc.
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Alexander Chan
+* Tested on: Windows 10 Version 1803, i7-5820k @ 3.70 GHz 16GB, GTX 1080 @ 1620 MHz 8GB (Personal Computer)
 
-### (TODO: Your README)
+### Features
+- Lambertian shading
+- Perspective correct UV interpolation and textures
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+	![](img/checkerboard-persp.PNG)
+
+	![](img/duck.PNG)
+
+- FXAA
+
+	FXAA is a fast screen space antialiasing method. It detects edges and blurs them.
+
+	Step 1:
+
+	Detect which pixels to apply antialiasing on.
+
+	![](img/fxaa_debug_passthrough.PNG)
+
+	Step 2:
+
+	Determine if the edge is oriented horizontal or vertical. Blue is vertical, yellow is horizontal.
+
+	![](img/fxaa_debug_horzvert.PNG)
+
+	Step 3:
+
+	Determine highest contrast pixel pair orthogonal to the edge. A pair consists of a blue and green pixel in the debug image.
+
+	![](img/fxaa_debug_pair.PNG)
+
+	Step 4:
+
+	Determine the length of the edge by traversing along the orientation of the edge.
+
+	Step 5:
+
+	Offset the pixel by its distance to the end of the edge. The closer it is to the edge, the more it is blurred.
 
 
 ### Credits
