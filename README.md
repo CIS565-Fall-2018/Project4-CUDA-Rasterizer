@@ -33,7 +33,7 @@ Features
 ==================
 
 ### Graphics Features
- - Basic rasterization pipeline: Vertex transformation, Primitive Assembly, Rasterization, Fragment shading
+#### Basic rasterization pipeline: Vertex transformation, Primitive Assembly, Rasterization, Fragment shading
 
 ![](renders/truck.gif)
 
@@ -46,7 +46,7 @@ Features
 * The way I did multiple primitive types is a simple way: instead of creating new **PrimitiveAssembly** kernels, I still treat primitives as triangles, but only **fill** the pixels on **edges** or **vertices**
 
 
- - UV texture mapping with bilinear texture filtering and perspective correct texture coordinates
+#### UV texture mapping with bilinear texture filtering and perspective correct texture coordinates
 
 No bilinear filtering | Bilinear filtering
 -------------------------- | ----------------------------
@@ -55,9 +55,9 @@ No bilinear filtering | Bilinear filtering
 
 * Bilinear texture mapping [wiki](https://en.wikipedia.org/wiki/Bilinear_filtering) is a way to avoid distortion when doing texture mapping. Given a uv coordinate, we use the nearest four texels to interpolate its color value.
 
- - Automatic Rotation: a dumb way to use shared memory to store a uniform rotation matrix for all vertices, such that the model is rotating by itself.
+#### Automatic Rotation: a dumb way to use shared memory to store a uniform rotation matrix for all vertices, such that the model is rotating by itself.
 
- - Post-processing: implemented bloom effect
+#### Post-processing: implemented bloom effect
 
  Without bloom | With bloom
 ------------|---------------
