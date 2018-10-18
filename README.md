@@ -15,7 +15,7 @@ Demo renders
 
 Rasterization
 ==================
-_Rasterization_ [[wiki](https://en.wikipedia.org/wiki/Rasterisation) is a render method in computer graphics, in essence, the process of showing 3D scenes containing objects are:
+_Rasterization_ [[wiki]](https://en.wikipedia.org/wiki/Rasterisation) is a render method in computer graphics, in essence, the process of showing 3D scenes containing objects are:
 
  - Project 3d objects into 2D camera plane
  - Given the 2D plane (with fixed resolution) and the projections of 3D shapes, fill the pixels that are inside those projected shapes.
@@ -53,7 +53,7 @@ No bilinear filtering | Bilinear filtering
 ![](renders/no_bilinear_filter.jpg) | ![](renders/bilinear_filter.jpg)
 
 
-* Bilinear texture mapping [[wiki](https://en.wikipedia.org/wiki/Bilinear_filtering) is a way to avoid distortion when doing texture mapping. Given a uv coordinate, we use the nearest four texels to interpolate its color value.
+* Bilinear texture mapping [[wiki]](https://en.wikipedia.org/wiki/Bilinear_filtering) is a way to avoid distortion when doing texture mapping. Given a uv coordinate, we use the nearest four texels to interpolate its color value.
 
 #### Automatic Rotation: a dumb way to use shared memory to store a uniform rotation matrix for all vertices, such that the model is rotating by itself.
 
@@ -63,7 +63,7 @@ No bilinear filtering | Bilinear filtering
 ------------|---------------
 ![](renders/duck.gif) | ![](renders/duckbloom.gif)
 
- * bloom effect [[wiki](https://en.wikipedia.org/wiki/Bloom_(shader_effect)) is a widely-used post processing method to present high-brightness areas. Shared memory is used to store pixel values that a block needed for perform gaussian blur.
+ * bloom effect [[wiki]](https://en.wikipedia.org/wiki/Bloom_(shader_effect)) is a widely-used post processing method to present high-brightness areas. Shared memory is used to store pixel values that a block needed for perform gaussian blur.
 
 ### GUI controls
 - Number keys to switch primitive types: triangles(1) / wireframe(2) / points(3)
