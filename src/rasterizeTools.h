@@ -107,3 +107,13 @@ T getBCInterpolate(const glm::vec3& bcCoord, T v0, T v1, T v2)
 {
     return bcCoord.x * v0 + bcCoord.y * v1 + bcCoord.z * v2;
 }
+
+__host__ __device__ static
+bool checkIsBackface(glm::vec3 tri[3])
+{
+    glm::vec3 v0 = tri[1] - tri[0];
+    glm::vec3 v1 = tri[2] - tri[0];
+    glm::vec3 N = glm::normalize(glm::cross(v0, v1));
+    glm::vec3 eyeDir = glm::vec3(0.f, 0.f, -1.f);
+    return glm::dot(eyeDir, N) > 0;
+}

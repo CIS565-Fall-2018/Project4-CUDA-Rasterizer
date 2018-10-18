@@ -41,12 +41,15 @@ CUDA Rasterizer
 
 To give guarantee enough operations for each step, all the features are turned on.
 
-
+![breakdown](img/breakdown.png)
 
 We can clearly see that the more space an onject took the window, the more time is spent on rasterization. Rasterization in our implementation is of heavy work.
 
+#### Performance impact of backface culling
 
+![fps](img/fps.png)
 
+As we can see, there's no significant improvement after we add backface culling (even drawbacks). This indicate that in our naive implementation of backface culling (mainly the backface detection part) has more overhead than contribution in these models.
 
 ### Credits
 

@@ -27,6 +27,7 @@
 #define PERSP_CORRECT_UV 1
 #define BILINEAR_TEX_FILTERING 1
 #define SHOW_NORMAL 0
+#define BACKFACE_CULLING 0
 
 namespace {
 
@@ -752,6 +753,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 			} // for each mesh
 
 		} // for each node
+        std::cout << "totalNumPrimitives: " << totalNumPrimitives << std::endl;
 
 	}
 	
@@ -823,45 +825,6 @@ void _vertexTransformAndAssembly(
     primitive.dev_verticesOut[vid] = vert_out;
 }
 
-__global__
-void _vertexTransformAndAssembly2(
-    int numVertices,
-    PrimitiveDevBufPointers primitive,
-    glm::mat4 MVP, glm::mat4 MV, glm::mat3 MV_normal,
-    int width, int height) {
-
-    // vertex id
-    int vid = (blockIdx.x * blockDim.x) + threadIdx.x;
-    if (vid < numVertices) {
-
-        // TODO: Apply vertex transformation here
-        // Multiply the MVP matrix for each vertex position, this will transform everything into clipping space
-        // Then divide the pos by its w element to transform into NDC space
-        // Finally transform x and y to viewport space
-        glm::vec4 position = MVP * glm::vec4(primitive.dev_position[vid], 1.0f);
-        position /= position.w;
-        position.x = width * (position.x + 1.0f) / 2.0f;
-        position.y = height * (1.0f - position.y) / 2.0f;
-        glm::vec4 eyeposition = MV * glm::vec4(primitive.dev_position[vid], 1.0f);
-        //eyeposition /= eyeposition.w;
-        // TODO: Apply vertex assembly here
-        // Assemble all attribute arraies into the primitive array
-        primitive.dev_verticesOut[vid].eyeNor = glm::normalize(MV_normal * primitive.dev_normal[vid]);
-        primitive.dev_verticesOut[vid].eyePos = glm::vec3(eyeposition);
-        primitive.dev_verticesOut[vid].pos = position;
-        if (primitive.dev_diffuseTex != NULL)
-        {
-            primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
-            primitive.dev_verticesOut[vid].dev_diffuseTex = primitive.dev_diffuseTex;
-            primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
-            primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
-        }
-
-    }
-}
-
-
-
 static int curPrimitiveBeginId = 0;
 
 __global__ 
@@ -904,6 +867,10 @@ void rasterizeKern(int totalNumPrimitives,
     glm::vec3 pos_in_eye[3] = { glm::vec3(primitive.v[0].eyePos),
                                 glm::vec3(primitive.v[1].eyePos),
                                 glm::vec3(primitive.v[2].eyePos) };
+
+#if BACKFACE_CULLING
+    if (checkIsBackface(pos_in_eye)) return;
+#endif
 
 #if RENDER_LINE
     glm::vec3 color = glm::vec3(1.0f, 0.3f, 0.3f);
