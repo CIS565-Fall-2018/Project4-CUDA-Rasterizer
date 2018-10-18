@@ -15,7 +15,7 @@ Demo renders
 
 Rasterization
 ==================
-Rasterization [wiki](https://en.wikipedia.org/wiki/Rasterisation) is a render method in computer graphics, in essence, the process of showing 3D scenes containing objects are:
+_Rasterization_ [wiki](https://en.wikipedia.org/wiki/Rasterisation) is a render method in computer graphics, in essence, the process of showing 3D scenes containing objects are:
 
  - Project 3d objects into 2D camera plane
  - Given the 2D plane (with fixed resolution) and the projections of 3D shapes, fill the pixels that are inside those projected shapes.
