@@ -99,3 +99,11 @@ float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3])
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
 }
+
+
+template <class T>
+__host__ __device__ static
+T getBCInterpolate(const glm::vec3& bcCoord, T v0, T v1, T v2)
+{
+    return bcCoord.x * v0 + bcCoord.y * v1 + bcCoord.z * v2;
+}
