@@ -8,7 +8,7 @@ CUDA Rasterizer
 
 ## Demo
 
-
+![](renders/demo.gif)
 
 ## Introduction
 
