@@ -10,7 +10,7 @@ CUDA Rasterizer
 ![SSAA](img/Rasterizer.gif)
 
 ### Introduction
-My GPU rasterizer produces real-time, interactive renders of complex geometry. Scene data is loaded from gltf file format and rendered using the pipeline outlined below.
+My GPU rasterizer produces real-time, interactive renders of complex geometry. In general, involves checking the pixels associated with each triangle's bounding square (transformed to screen space), using barycentric coordinates to determine overlap color and depth for the fragment map, which is then lit using Lamberrt shading. Scene data is loaded from gltf file format and rendered using the pipeline outlined below.
 
 ### Pipeline
 1. Vertex shading
