@@ -19,7 +19,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #define TEXTURE 1
-#define CORRECT_INTERP 1 
+#define PERSPECTIVE_INTERP 1 
 #define TEXTURE_BILINEAR 0
 
 #define DOWNSCALERATIO 3
@@ -1373,7 +1373,7 @@ void rasterizeFill(int numPrimitives, int curPrimitiveBeginId, Primitive* primit
 										thisPrimitive.v[0].eyePos * baryCoords.x +
 										thisPrimitive.v[1].eyePos * baryCoords.y +
 										thisPrimitive.v[2].eyePos * baryCoords.z);
-#if CORRECT_INTERP
+#if PERSPECTIVE_INTERP
 									// get correct depth to use for interpolation
 									float newBaryDepth = 1.f / (1 / thisPrimitive.v[0].pos.z * baryCoords.x +
 										1 / thisPrimitive.v[1].pos.z * baryCoords.y +
@@ -1392,7 +1392,7 @@ void rasterizeFill(int numPrimitives, int curPrimitiveBeginId, Primitive* primit
 
 									/***** Texture handling ****/
 #if TEXTURE
-#if CORRECT_INTERP
+#if PERSPECTIVE_INTERP
 						// get the starting index of the color in the tex buffer
 									glm::vec2 uv = newBaryDepth * (
 										thisPrimitive.v[0].texcoord0 * baryCoords.x / thisPrimitive.v[0].pos.z +
