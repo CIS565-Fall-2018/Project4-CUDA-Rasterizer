@@ -26,6 +26,7 @@
 #define RENDER_POINT 0
 #define PERSP_CORRECT_UV 1
 #define BILINEAR_TEX_FILTERING 1
+#define SHOW_NORMAL 0
 
 namespace {
 
@@ -299,6 +300,9 @@ void render(int w, int h, Fragment* fragmentBuffer, glm::vec3* framebuffer) {
 #endif
     
     framebuffer[index] = color_out;
+#if SHOW_NORMAL
+    framebuffer[index] = fragment.eyeNor * 0.5f + 0.5f;
+#endif
 }
 
 /**

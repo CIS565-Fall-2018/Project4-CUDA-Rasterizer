@@ -5,16 +5,52 @@ CUDA Rasterizer
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
 
-* (TODO) YOUR NAME HERE
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Zichuan Yu
+  * [LinkedIn](https://www.linkedin.com/in/zichuan-yu/), [Behance](https://www.behance.net/zainyu717ebcc)
+* Tested on: Windows 10.0.17134 Build 17134, i7-4710 @ 2.50GHz 16GB, GTX 980m 4096MB GDDR5
 
-### (TODO: Your README)
+### Features
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+- Basic features
+- Line and point rendering
+- UV texture mapping with bilinear texture filtering and perspective correct texture coordinates.
+
+### Results
+
+#### Basics
+
+|![albedo](img/albedo.gif)|![normal](img/normal.gif)|![lighting](img/lighting.gif)|
+|-|-|-|
+|Albedo|Normal|Lambert + Blinn-phong|
+
+#### Line and point rendering
+
+|![line_render](img/line_render.gif)|![point_render](img/point_render.gif)|
+|-|-|
+|Line|Point|
+
+#### Perspective correct UV and bilinear texture 
+
+|![incorrect_uv](img/incorrect_uv.gif)|![correct_uv](img/correct_uv.gif)|
+|-|-|
+|Incorrect UV|Correct UV|
+
+### Performance Analysis
+
+#### Time spent in each stage
+
+To give guarantee enough operations for each step, all the features are turned on.
+
+
+
+We can clearly see that the more space an onject took the window, the more time is spent on rasterization. Rasterization in our implementation is of heavy work.
+
+
 
 
 ### Credits
 
 * [tinygltfloader](https://github.com/syoyo/tinygltfloader) by [@soyoyo](https://github.com/syoyo)
 * [glTF Sample Models](https://github.com/KhronosGroup/glTF/blob/master/sampleModels/README.md)
+* [ssloy/tinyrenderer](https://github.com/ssloy/tinyrenderer/)
+* [scratchapixel-Interpolation](https://www.scratchapixel.com/lessons/mathematics-physics-for-computer-graphics/interpolation/bilinear-filterig)
