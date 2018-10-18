@@ -18,7 +18,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define PERSP_DIVIDE 0
+#define PERSP_DIVIDE 1
 
 namespace {
 
@@ -102,7 +102,6 @@ namespace {
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
-
 static int width = 0;
 static int height = 0;
 
@@ -146,7 +145,9 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     int index = x + (y * w);
 
     if (x < w && y < h) {
-        framebuffer[index] = fragmentBuffer[index].color;
+      auto col = fragmentBuffer[index].color;
+
+      framebuffer[index] = fragmentBuffer[index].color;
 
 		// TODO: add your fragment shader code here
 
@@ -223,8 +224,6 @@ void _deviceBufferCopy(int N, BufferByte* dev_dst, const BufferByte* dev_src, in
 				+ j];
 		}
 	}
-	
-
 }
 
 __global__
@@ -335,8 +334,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 		}
 	}
 
-
-
 	// 2. for each mesh: 
 	//		for each primitive: 
 	//			build device buffer of indices, materail, and each attributes
@@ -353,7 +350,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 				traverseNode(nodeString2Matrix, scene, *it, glm::mat4(1.0f));
 			}
 		}
-
 
 		// parse through node to access mesh
 
@@ -412,9 +408,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 						indexAccessor.byteOffset,
 						componentTypeByteSize);
 
-
 					checkCUDAError("Set Index Buffer");
-
 
 					// ---------Primitive Info-------
 
@@ -450,7 +444,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 						// output error
 						break;
 					};
-
 
 					// ----------Attributes-------------
 
@@ -559,7 +552,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 						// You can also use the above code loading diffuse material as a start point 
 					}
 
-
 					// ---------Node hierarchy transform--------
 					cudaDeviceSynchronize();
 					
@@ -597,11 +589,8 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 					totalNumPrimitives += numPrimitives;
 
 				} // for each primitive
-
 			} // for each mesh
-
 		} // for each node
-
 	}
 	
 
@@ -610,14 +599,12 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 		cudaMalloc(&dev_primitives, totalNumPrimitives * sizeof(Primitive));
 	}
 	
-
 	// Finally, cudaFree raw dev_bufferViews
 	{
-
 		std::map<std::string, BufferByte*>::const_iterator it(bufferViewDevPointers.begin());
 		std::map<std::string, BufferByte*>::const_iterator itEnd(bufferViewDevPointers.end());
 			
-			//bufferViewDevPointers
+	  //bufferViewDevPointers
 
 		for (; it != itEnd; it++) {
 			cudaFree(it->second);
@@ -625,11 +612,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 
 		checkCUDAError("Free BufferView Device Mem");
 	}
-
-
 }
-
-
 
 __global__ 
 void _vertexTransformAndAssembly(
@@ -642,22 +625,23 @@ void _vertexTransformAndAssembly(
 	int v_id = (blockIdx.x * blockDim.x) + threadIdx.x;
 	if (v_id < numVertices) {
 
-    glm::vec3 v_world_space = primitive.dev_position[v_id];
+    glm::vec4 v_world_space = glm::vec4(primitive.dev_position[v_id], 1.f);
 
 		// Apply vertex transformation here
 		// Transform to clipping space
-    glm::vec4 v_pos = MVP * glm::vec4(v_world_space, 1.f);
+    glm::vec4 v_pos = MVP * v_world_space;
     // Transform into NDC space
-    v_pos = (v_pos.w == 0) ? glm::vec4(0.f) : v_pos / v_pos.w;
+    v_pos /= v_pos.w;
     // Transform to screen space
     v_pos.x = (v_pos.x + 1) * width / 2.f;
     v_pos.y = (1 - v_pos.y) * height / 2.f;
+    v_pos.z = (1 + v_pos.z) / 2.f;
 
 		// Apply vertex assembly here
 		// Assemble all attribute arrays into the primitive array
     primitive.dev_verticesOut[v_id].pos = v_pos;
-    primitive.dev_verticesOut[v_id].eyeNor = MV_normal * primitive.dev_normal[v_id];
-    primitive.dev_verticesOut[v_id].eyePos = glm::vec3(MV * glm::vec4(v_world_space, 1.f));
+    primitive.dev_verticesOut[v_id].eyeNor = glm::normalize(MV_normal * primitive.dev_normal[v_id]);
+    primitive.dev_verticesOut[v_id].eyePos = glm::vec3(MV * v_world_space);
     // TODO HB - later add texture aspect here ^^ for now leave as is
 	}
 }
@@ -700,91 +684,69 @@ __global__ void computeRasterization(const int width, const int height, const in
     return;
   }
 
-  // find bounding box for this triangle
-  Primitive triangle = primitives[triangle_index];
-  glm::vec2 min_xy(
-    glm::min(triangle.v[0].pos.x, glm::min(triangle.v[1].pos.x, triangle.v[2].pos.x)),
-    glm::min(triangle.v[0].pos.y, glm::min(triangle.v[1].pos.y, triangle.v[2].pos.y)));
-  glm::vec2 max_xy(
-    glm::max(triangle.v[0].pos.x, glm::max(triangle.v[1].pos.x, triangle.v[2].pos.x)),
-    glm::max(triangle.v[0].pos.y, glm::max(triangle.v[1].pos.y, triangle.v[2].pos.y)));
-
-  // clamp to screen space bounds
-  min_xy = glm::clamp(min_xy, glm::vec2(0.f), glm::vec2(1.f));
-  max_xy = glm::clamp(max_xy, glm::vec2(0.f), glm::vec2(1.f));
-
-  // check if valid object on screen
-  if (min_xy.x >= max_xy.x || min_xy.y >= max_xy.y) {
-    return;
-  }
-
-  // min and max in screenspace, convert to pixel coordinates for working with fragments
-  //min_xy.x *= width; min_xy.y = (1 - min_xy.y) * height;
-  //max_xy.x *= width; max_xy.y = (1 - max_xy.y) * height;
-
   // grabbing vertex information
+  Primitive triangle = primitives[triangle_index];
   VertexOut v0 = triangle.v[0]; glm::vec3 a(v0.pos);
   VertexOut v1 = triangle.v[1]; glm::vec3 b(v1.pos);
   VertexOut v2 = triangle.v[2]; glm::vec3 c(v2.pos);
+  glm::vec3 tri[3] = { a, b, c };
 
-  // doing scanline rendering based on y-value and line-triangle intersections
-  float x = glm::floor(min_xy.x); float x_max = glm::ceil(max_xy.x);
-  float y = glm::floor(min_xy.y); float y_max = glm::ceil(max_xy.y);
-  // TODO HB - find x intersections for the lines that make up this triangle
-  // for now just doing - every fragment location within the bounds
-  for (; y < y_max; ++y) {
-    for (; x < x_max; ++x) {
-      // our current fragment location
+  // find bounding box for this triangle - clamping between screenspace bounds [0, width], [0, height])
+  
+  glm::vec2 min_xy(
+    glm::min(a.x, glm::min(b.x, glm::min(c.x, 1.f * width))),
+    glm::min(a.y, glm::min(b.y, glm::min(c.y, 1.f * height))));
+  glm::vec2 max_xy(
+    glm::max(a.x, glm::max(b.x, glm::max(c.x, 0.f))),
+    glm::max(a.y, glm::max(b.y, glm::max(c.y, 0.f))));
+
+  // doing scanline rendering based on y-value and x-location depths
+  int x_min = glm::floor(min_xy.x); int x_max = glm::ceil(max_xy.x);
+  int y_min = glm::floor(min_xy.y); int y_max = glm::ceil(max_xy.y);
+  for (int y = y_min; y <= y_max; ++y) {
+    for (int x = x_min; x <= x_max; ++x) {
+      // 2D x,y to 1D indexing --> x + width * y;
+      int fragment_idx = (int)(x + width * y);
       glm::vec3 p(x, y, 0);
 
       // setup barycentric weights for future calculations
-      // points ordered a, b, c and corresponding areas are A: (b,c) B: (a,c) C: (a,b)
-      float area_A = 0.5f * glm::length(glm::cross(b - p, c - p));
-      float area_B = 0.5f * glm::length(glm::cross(a - p, c - p));
-      float area_C = 0.5f * glm::length(glm::cross(a - p, b - p));
-      float area_total = 0.5f * glm::length(glm::cross(a - c, b - c));
-      if (area_A + area_B + area_C > area_total) {
+      glm::vec3 b_weights = calculateBarycentricCoordinate(tri, glm::vec2(x, y));
+      if (!isBarycentricCoordInBounds(b_weights)) {
+        // not part of this triangle
         continue;
       }
-      glm::vec3 b_weights(area_A / area_total, area_B / area_total, area_C / area_total);
 
       // calculate attributes based on barycentric values
-#if PERSP_DIVIDE 1
-      p.z = 1.f / (b_weights[0] / a.z + b.weights[1] / b.z + c.weights[2] / c.z);
-#else
-      p.z = b_weights[0] * a.z + b_weights[1] * b.z + b_weights[2] * c.z;
-
-#endif
-      glm::vec4 pos = b_weights[0] * v0.pos
-                    + b_weights[1] * v1.pos
-                    + b_weights[2] * v2.pos;
-      glm::vec3 nor = b_weights[0] * v0.eyeNor
-                    + b_weights[1] * v1.eyeNor
-                    + b_weights[2] * v2.eyeNor;
-      glm::vec2 uvs = b_weights[0] * v0.texcoord0
-                    + b_weights[1] * v1.texcoord0
-                    + b_weights[2] * v2.texcoord0;
-
       // fake [0, int_max] depth buffer range so that can compare int values - easier for use with atomicCAS
-      p.z *= INT_MAX;
-
-      // 2D x,y to 1D indexing --> x + width * y;
-      int fragment_idx = x + width * y;
+      int z_depth = (int)(INT_MAX * (b_weights.x * a.z + b_weights.y * b.z + b_weights.z * c.z));
+      // update for perspective
+      b_weights /= glm::vec3(a.z, b.z, c.z);
+      // calculate remaining attributes with perspective divide
+      float z_perspective = 1.f / (b_weights.x + b_weights.y + b_weights.z);
+      glm::vec3 pos = z_perspective * (b_weights.x * v0.eyePos + b_weights.y * v1.eyePos + b_weights.z * v2.eyePos);
+      glm::vec3 nor = z_perspective * (b_weights.x * v0.eyeNor + b_weights.y * v1.eyeNor + b_weights.z * v2.eyeNor);
+      nor = glm::normalize(nor);
+      /*glm::vec2 uvs = p.z * (b_weights.x * v0.texcoord0
+                    + b_weights.y * v1.texcoord0
+                    + b_weights.z * v2.texcoord0);*/
 
       // use mutex check to avoid race conditions for writing to fragment buffer
       // Waiting for fragment to unlock
-      while (atomicCAS(&mutex[fragment_idx], 0, 1) != 0) {
-      }
-      // fragment available - do depth check
-      if (p.z < depth[fragment_idx]) {
-        depth[fragment_idx] = p.z;
-        fragments[fragment_idx].color = nor;
-        //fragments[fragment_idx].eyeNor = nor;
-        //fragments[fragment_idx].eyePos = pos;
-        // fragments[fragment_idx].texcoord0 = uvs; // TODO HB - for later fragment attributes
-      }
-      // reset mutex
-      mutex[fragment_idx] = 0;
+      bool isSet;
+      do {
+        isSet = (atomicCAS(&mutex[fragment_idx], 0, 1) == 0);
+        if (isSet) {
+          // fragment available - do depth check
+          if (z_depth < depth[fragment_idx]) {
+            depth[fragment_idx] = z_depth;
+            fragments[fragment_idx].color = nor;
+            //fragments[fragment_idx].eyeNor = nor;
+            //fragments[fragment_idx].eyePos = pos;
+            // fragments[fragment_idx].texcoord0 = uvs; // TODO HB - for later fragment attributes
+          }
+          mutex[fragment_idx] = 0;
+        }
+      } while (!isSet);
 
     } // end: from x_min to x_max
   } // end: from y_min to y_max
@@ -872,7 +834,6 @@ void rasterizeFree() {
 
 			cudaFree(p->dev_verticesOut);
 
-			
 			//TODO: release other attributes and materials
 		}
 	}
