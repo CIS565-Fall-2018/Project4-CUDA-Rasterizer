@@ -699,7 +699,7 @@ void _vertexTransformAndAssembly(
 			vertex.dev_diffuseTex = NULL;
 			thrust::default_random_engine rng = thrust::default_random_engine(utilhash(vid + 11));
 			thrust::uniform_real_distribution<float> u01(0, 1);
-			vertex.color = glm::vec3(u01(rng), u01(rng), u01(rng));
+			vertex.color = glm::vec3(1.0, u01(rng), u01(rng));
 		}
 		else {
 			vertex.dev_diffuseTex = primitive.dev_diffuseTex;
