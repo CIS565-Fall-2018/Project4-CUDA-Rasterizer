@@ -18,7 +18,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define PERSP_DIVIDE 1
+#define BACKFACE_CULL 1
+#define MUTEX 1
+#define NORMALS 0
 
 namespace {
 
@@ -45,11 +47,11 @@ namespace {
 
 		 glm::vec3 eyePos;	// eye space position used for shading
 		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
-		// glm::vec3 col;
+		 glm::vec3 col;
 		 glm::vec2 texcoord0;
 		 TextureData* dev_diffuseTex = NULL;
-		// int texWidth, texHeight;
-		// ...
+     int texture_width;
+     int texture_height;
 	};
 
 	struct Primitive {
@@ -59,16 +61,12 @@ namespace {
 
 	struct Fragment {
 		glm::vec3 color;
-
-		// TODO: add new attributes to your Fragment
-		// The attributes listed below might be useful, 
-		// but always feel free to modify on your own
-
-		// glm::vec3 eyePos;	// eye space position used for shading
-		// glm::vec3 eyeNor;
-		// VertexAttributeTexcoord texcoord0;
-		// TextureData* dev_diffuseTex;
-		// ...
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;
+		VertexAttributeTexcoord texcoord0;
+		TextureData* dev_diffuseTex;
+    int texture_width;
+    int texture_height;
 	};
 
 	struct PrimitiveDevBufPointers {
@@ -137,21 +135,64 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 
 /** 
 * Writes fragment colors to the framebuffer
+*
+* Fragment shader code
 */
 __global__
 void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-    int index = x + (y * w);
+  int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+  int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+  int index = x + (y * w);
 
-    if (x < w && y < h) {
-      auto col = fragmentBuffer[index].color;
+  if (x < w && y < h) {
+    auto col = fragmentBuffer[index].color;
+    Fragment f = fragmentBuffer[index];
+    framebuffer[index] = fragmentBuffer[index].color;
 
-      framebuffer[index] = fragmentBuffer[index].color;
+    glm::vec3 dir_to_light(glm::normalize(glm::vec3(50.f, 50.f, 50.f) - f.eyePos));
+    glm::vec3 nor = f.eyeNor;
+    glm::vec3 dir_to_eye(glm::normalize(-f.eyePos));
+    glm::vec3 state(dir_to_light + dir_to_eye);
+    glm::vec3 texture_coloring(255.f);
 
-		// TODO: add your fragment shader code here
+    if (fragmentBuffer[index].dev_diffuseTex) {
+      int width = f.texture_width;
+      int height = f.texture_height;
 
+      int x_min = glm::floor((width - 1.f) * f.texcoord0[0]);
+      int y_min = glm::floor((height - 1.f) * f.texcoord0[1]);
+      int x_max = (x_min + 1) % width;
+      int y_max = (y_min + 1) % height;
+
+      // bilinear indexing: LL - lower left, LR - lower right, UL - upper left, UR - upper right
+      int LL = (x_min + y_min * width) * 3;
+      int LR = (x_max + y_min * width) * 3;
+      int UL = (x_min + y_max * width) * 3;
+      int UR = (x_max + y_max * width) * 3;
+
+      glm::vec3 LLTexel(f.dev_diffuseTex[LL], f.dev_diffuseTex[LL + 1], f.dev_diffuseTex[LL + 2]);
+      glm::vec3 LRTexel(f.dev_diffuseTex[LR], f.dev_diffuseTex[LR + 1], f.dev_diffuseTex[LR + 2]);
+      glm::vec3 ULTexel(f.dev_diffuseTex[UL], f.dev_diffuseTex[UL + 1], f.dev_diffuseTex[UL + 2]);
+      glm::vec3 URTexel(f.dev_diffuseTex[UR], f.dev_diffuseTex[UR + 1], f.dev_diffuseTex[UR + 2]);
+      //Coefs for bilinear filtering
+      float lerp_t_x = x - (float)(x_min);
+      float lerp_t_y = y - (float)(y_min);
+
+      // the bilinear lerp calc (2D lerping)
+      texture_coloring = glm::mix(glm::mix(LLTexel, LRTexel, lerp_t_x), glm::mix(ULTexel, URTexel, lerp_t_x), lerp_t_y);
     }
+
+    // final color adjustments for [0, 1] instead of [0, 255]
+    texture_coloring /= 255.f;
+
+    // display based on type // current type only triangle
+    framebuffer[index] = glm::max(0.f, glm::dot(dir_to_light, nor)) * texture_coloring;
+    framebuffer[index] += glm::vec3(glm::pow(glm::max(0.f, glm::dot(nor, state)), 128.f));
+
+#if NORMALS
+    framebuffer[index] = nor;
+#endif
+  }
 }
 
 /**
@@ -642,7 +683,12 @@ void _vertexTransformAndAssembly(
     primitive.dev_verticesOut[v_id].pos = v_pos;
     primitive.dev_verticesOut[v_id].eyeNor = glm::normalize(MV_normal * primitive.dev_normal[v_id]);
     primitive.dev_verticesOut[v_id].eyePos = glm::vec3(MV * v_world_space);
-    // TODO HB - later add texture aspect here ^^ for now leave as is
+    primitive.dev_verticesOut[v_id].dev_diffuseTex = primitive.dev_diffuseTex;
+    primitive.dev_verticesOut[v_id].texture_width = primitive.diffuseTexWidth;
+    primitive.dev_verticesOut[v_id].texture_height = primitive.diffuseTexHeight;
+    if (primitive.dev_texcoord0 != NULL) {
+      primitive.dev_verticesOut[v_id].texcoord0 = primitive.dev_texcoord0[v_id];
+    }
 	}
 }
 
@@ -691,8 +737,14 @@ __global__ void computeRasterization(const int width, const int height, const in
   VertexOut v2 = triangle.v[2]; glm::vec3 c(v2.pos);
   glm::vec3 tri[3] = { a, b, c };
 
+#if BACKFACE_CULL
+  // ignore triangles facing the other direction
+  if (calculateSignedArea(tri) < 0.f) {
+    return;
+  }
+#endif
+
   // find bounding box for this triangle - clamping between screenspace bounds [0, width], [0, height])
-  
   glm::vec2 min_xy(
     glm::min(a.x, glm::min(b.x, glm::min(c.x, 1.f * width))),
     glm::min(a.y, glm::min(b.y, glm::min(c.y, 1.f * height))));
@@ -700,9 +752,25 @@ __global__ void computeRasterization(const int width, const int height, const in
     glm::max(a.x, glm::max(b.x, glm::max(c.x, 0.f))),
     glm::max(a.y, glm::max(b.y, glm::max(c.y, 0.f))));
 
-  // doing scanline rendering based on y-value and x-location depths
+  // create bounds
   int x_min = glm::floor(min_xy.x); int x_max = glm::ceil(max_xy.x);
   int y_min = glm::floor(min_xy.y); int y_max = glm::ceil(max_xy.y);
+
+  // check bounds
+  if (x_min > x_max || y_min > y_max) {
+    return;
+  }
+
+
+  TextureData *pDiffuseTexData = v0.dev_diffuseTex;
+  int diffuse_texture_width = 0;
+  int diffuse_texture_height = 0;
+  if (pDiffuseTexData) {
+    diffuse_texture_width = v0.texture_width;
+    diffuse_texture_height = v0.texture_height;
+  }
+
+  // doing scanline rendering based on y-value and x-location depths
   for (int y = y_min; y <= y_max; ++y) {
     for (int x = x_min; x <= x_max; ++x) {
       // 2D x,y to 1D indexing --> x + width * y;
@@ -726,10 +794,9 @@ __global__ void computeRasterization(const int width, const int height, const in
       glm::vec3 pos = z_perspective * (b_weights.x * v0.eyePos + b_weights.y * v1.eyePos + b_weights.z * v2.eyePos);
       glm::vec3 nor = z_perspective * (b_weights.x * v0.eyeNor + b_weights.y * v1.eyeNor + b_weights.z * v2.eyeNor);
       nor = glm::normalize(nor);
-      /*glm::vec2 uvs = p.z * (b_weights.x * v0.texcoord0
-                    + b_weights.y * v1.texcoord0
-                    + b_weights.z * v2.texcoord0);*/
+      glm::vec2 uvs = z_perspective * (b_weights.x * v0.texcoord0 + b_weights.y * v1.texcoord0 + b_weights.z * v2.texcoord0);
 
+#if MUTEX
       // use mutex check to avoid race conditions for writing to fragment buffer
       // Waiting for fragment to unlock
       bool isSet;
@@ -740,13 +807,36 @@ __global__ void computeRasterization(const int width, const int height, const in
           if (z_depth < depth[fragment_idx]) {
             depth[fragment_idx] = z_depth;
             fragments[fragment_idx].color = nor;
-            //fragments[fragment_idx].eyeNor = nor;
-            //fragments[fragment_idx].eyePos = pos;
-            // fragments[fragment_idx].texcoord0 = uvs; // TODO HB - for later fragment attributes
+            fragments[fragment_idx].eyeNor = nor;
+            fragments[fragment_idx].eyePos = pos;
+            fragments[fragment_idx].texcoord0 = uvs;
+            if (pDiffuseTexData) {
+              fragments[fragment_idx].dev_diffuseTex = pDiffuseTexData;
+              fragments[fragment_idx].texture_width = diffuse_texture_width;
+              fragments[fragment_idx].texture_height = diffuse_texture_height;
+            }
           }
           mutex[fragment_idx] = 0;
         }
       } while (!isSet);
+
+# else 
+      if (z_depth < depth[fragment_idx]) {
+        depth[fragment_idx] = z_depth;
+        fragments[fragment_idx].color = nor;
+        fragments[fragment_idx].eyeNor = nor;
+        fragments[fragment_idx].eyePos = pos;
+        fragments[fragment_idx].texcoord0 = uvs;
+        if (pDiffuseTexData) {
+          fragments[fragment_idx].dev_diffuseTex = pDiffuseTexData;
+          fragments[fragment_idx].texture_width = diffuse_texture_width;
+          fragments[fragment_idx].texture_height = diffuse_texture_height;
+        }
+      } else {
+        // occluded
+        continue;
+      }
+# endif
 
     } // end: from x_min to x_max
   } // end: from y_min to y_max
