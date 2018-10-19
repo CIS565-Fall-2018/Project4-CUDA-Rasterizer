@@ -21,6 +21,10 @@
 #define BACKFACE_CULL 1
 #define MUTEX 1
 #define NORMALS 0
+//#define TRIANGLES --> (lines||points) == 0;
+#define LINES 0
+#define POINTS 1
+#define HIGHLIGHT 0
 
 namespace {
 
@@ -40,18 +44,13 @@ namespace {
 
 	struct VertexOut {
 		glm::vec4 pos;
-
-		// TODO: add new attributes to your VertexOut
-		// The attributes listed below might be useful, 
-		// but always feel free to modify on your own
-
-		 glm::vec3 eyePos;	// eye space position used for shading
-		 glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
-		 glm::vec3 col;
-		 glm::vec2 texcoord0;
-		 TextureData* dev_diffuseTex = NULL;
-     int texture_width;
-     int texture_height;
+		glm::vec3 eyePos;	// eye space position used for shading
+		glm::vec3 eyeNor;	// eye space normal used for shading, cuz normal will go wrong after perspective transformation
+		glm::vec3 col;
+		glm::vec2 texcoord0;
+		TextureData* dev_diffuseTex = NULL;
+    int texture_width;
+    int texture_height;
 	};
 
 	struct Primitive {
@@ -86,14 +85,9 @@ namespace {
 		TextureData* dev_diffuseTex;
 		int diffuseTexWidth;
 		int diffuseTexHeight;
-		// TextureData* dev_specularTex;
-		// TextureData* dev_normalTex;
-		// ...
 
 		// Vertex Out, vertex used for rasterization, this is changing every frame
 		VertexOut* dev_verticesOut;
-
-		// TODO: add more attributes when needed
 	};
 
 }
@@ -185,9 +179,17 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
     // final color adjustments for [0, 1] instead of [0, 255]
     texture_coloring /= 255.f;
 
-    // display based on type // current type only triangle
+    // display based on visualization type
+#if LINES || POINTS
+    framebuffer[index] = f.color;
+#else // TRIANGLES
     framebuffer[index] = glm::max(0.f, glm::dot(dir_to_light, nor)) * texture_coloring;
-    framebuffer[index] += glm::vec3(glm::pow(glm::max(0.f, glm::dot(nor, state)), 128.f));
+#endif
+
+#if HIGHLIGHT
+    // add highlight coloring
+    framebuffer[index] += glm::vec3(glm::pow(glm::max(0.f, glm::dot(nor, state)), 5.f));
+#endif
 
 #if NORMALS
     framebuffer[index] = nor;
@@ -419,7 +421,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 					if (primitive.indices.empty())
 						return;
 
-					// TODO: add new attributes for your PrimitiveDevBufPointers when you add new attributes
+					// add new attributes here for your PrimitiveDevBufPointers when you add new attributes
 					VertexIndex* dev_indices = NULL;
 					VertexAttributePosition* dev_position = NULL;
 					VertexAttributeNormal* dev_normal = NULL;
@@ -697,27 +699,112 @@ static int curPrimitiveBeginId = 0;
 __global__ 
 void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_primitives, PrimitiveDevBufPointers primitive) {
 
-	// index id
-	int iid = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int index_id = (blockIdx.x * blockDim.x) + threadIdx.x;
+  if (index_id >= numIndices) {
+    return;
+  }
 
-	if (iid < numIndices) {
+  // id for current primitives vector
+	int primitive_id = 0;	
 
-		// uncomment the following code for a start
-		// This is primitive assembly for triangles
+	if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
+    primitive_id = index_id / (int)primitive.primitiveType;
+		dev_primitives[primitive_id + curPrimitiveBeginId].v[index_id % (int)primitive.primitiveType]
+			= primitive.dev_verticesOut[primitive.dev_indices[index_id]];
+	} else if (primitive.primitiveMode == TINYGLTF_MODE_LINE) {
+    primitive_id = index_id / (int)primitive.primitiveType;
+    dev_primitives[primitive_id + curPrimitiveBeginId].primitiveType = Line;
+    dev_primitives[primitive_id + curPrimitiveBeginId].v[index_id % (int)primitive.primitiveType]
+      = primitive.dev_verticesOut[primitive.dev_indices[index_id]];
+  } else if (primitive.primitiveMode == TINYGLTF_MODE_POINTS) {
+    primitive_id = index_id / (int)primitive.primitiveType;
+    dev_primitives[primitive_id + curPrimitiveBeginId].primitiveType = Point;
+    dev_primitives[primitive_id + curPrimitiveBeginId].v[index_id % (int)primitive.primitiveType]
+      = primitive.dev_verticesOut[primitive.dev_indices[index_id]];
+  }
+}
 
-    //----
-		int pid;	// id for cur primitives vector
-		if (primitive.primitiveMode == TINYGLTF_MODE_TRIANGLES) {
-			pid = iid / (int)primitive.primitiveType;
-			dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-				= primitive.dev_verticesOut[primitive.dev_indices[iid]];
-		}
-    //----
+__global__
+void computePointsRasterization(const int width, const int height, const int num_inputs,
+  const Primitive *primitives,
+  Fragment *fragments) {
 
+  int input_index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (input_index >= num_inputs) {
+    return;
+  }
 
-		// TODO - HB: other primitive types (point, line)
-	}
-	
+  Primitive primitive = primitives[input_index];
+  glm::vec2 a(primitive.v[0].pos);
+  glm::vec2 b(primitive.v[1].pos);
+  glm::vec2 c(primitive.v[2].pos);
+
+  glm::vec3 color(1.f);
+
+  int index = 0;
+  if (0 <= a.x && a.x < width && 0 <= a.y && a.y < height) {
+    index = (int)a.x + (int)a.y * width;
+    fragments[index].color = color;
+  }
+  if (0 <= b.x && b.x < width && 0 <= b.y && b.y < height) {
+    index = (int)b.x + (int)b.y * width;
+    fragments[index].color = color;
+  }
+  if (0 <= c.x && c.x < width && 0 <= c.y && c.y < height) {
+    index = (int)c.x + (int)c.y * width;
+    fragments[index].color = color;
+  }
+}
+
+__host__ __device__
+void lineCalculations(const int width, const int height,
+  const glm::vec2& a, const glm::vec2& b,
+  Fragment *fragments) {
+
+  glm::vec2 min(
+    glm::max(0.f, glm::min(a.x, b.x)),
+    glm::max(0.f, glm::min(a.y, b.y)));
+  glm::vec2 max(
+    glm::min((float)width, glm::max(a.x, b.x)),
+    glm::min((float)height, glm::max(a.y, b.y)));
+  min = glm::floor(min);
+  max = glm::ceil(max);
+
+  // invalid config
+  if (min.x > max.x && min.y > max.y) {
+    return;
+  }
+
+  // optimize runtime calcs, iterate over longer dir (fewer var creations)
+  glm::vec2 diff(max - min);
+  int start_to_end = (diff.x >= diff.y) ? diff.x : diff.y;
+
+  glm::vec3 color(1.f);
+  // fill values
+  for (float i = 0; i <= start_to_end; ++i) {
+    glm::vec2 p = glm::mix(a, b, i / start_to_end);
+    fragments[(int)p.x + (int)p.y * width].color = color;
+  }
+}
+
+__global__
+void computeLinesRasterization(const int width, const int height, const int num_inputs,
+  const Primitive *primitives,
+  Fragment *fragments) {
+
+  int input_index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (input_index >= num_inputs) {
+    return;
+  }
+
+  Primitive primitive = primitives[input_index];
+  glm::vec2 a(primitive.v[0].pos);
+  glm::vec2 b(primitive.v[1].pos);
+  glm::vec2 c(primitive.v[2].pos);
+
+  lineCalculations(width, height, a, b, fragments);
+  lineCalculations(width, height, b, c, fragments);
+  lineCalculations(width, height, c, a, fragments);
 }
 
 __global__ void computeRasterization(const int width, const int height, const int num_triangles,
@@ -761,7 +848,7 @@ __global__ void computeRasterization(const int width, const int height, const in
     return;
   }
 
-
+  // beg load tex data for looping so dont need to reload
   TextureData *pDiffuseTexData = v0.dev_diffuseTex;
   int diffuse_texture_width = 0;
   int diffuse_texture_height = 0;
@@ -852,13 +939,14 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     dim3 blockCount2d((width  - 1) / blockSize2d.x + 1,
 		(height - 1) / blockSize2d.y + 1);
 
-	// Execute your rasterization pipeline here
+	// Execute the rasterization pipeline
 	// (See README for rasterization pipeline outline.)
+
+  dim3 numThreadsPerBlock(128);
 
 	// Vertex Process & primitive assembly
 	{
-		curPrimitiveBeginId = 0;
-		dim3 numThreadsPerBlock(128);
+    curPrimitiveBeginId = 0;
 
 		auto it = mesh2PrimitivesMap.begin();
 		auto itEnd = mesh2PrimitivesMap.end();
@@ -891,11 +979,18 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// rasterize
-  int numThreads = 128;
-  int numBlocks = (totalNumPrimitives + numThreads - 1) / numThreads;
-  computeRasterization << <numBlocks, numThreads >> > (
+  int numBlocks = (totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x;
+#if POINTS
+  computePointsRasterization << <numBlocks, numThreadsPerBlock >> > (
+    width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer);
+#elif LINES
+  computeLinesRasterization << <numBlocks, numThreadsPerBlock >> > (
+    width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer);
+#else // TRIANGLES
+  computeRasterization << <numBlocks, numThreadsPerBlock >> > (
     width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer,
     dev_depth, dev_mutex);
+#endif
 
   // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
@@ -921,14 +1016,9 @@ void rasterizeFree() {
 			cudaFree(p->dev_normal);
 			cudaFree(p->dev_texcoord0);
 			cudaFree(p->dev_diffuseTex);
-
 			cudaFree(p->dev_verticesOut);
-
-			//TODO: release other attributes and materials
 		}
 	}
-
-	////////////
 
   cudaFree(dev_primitives);
   dev_primitives = NULL;
