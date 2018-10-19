@@ -23,8 +23,8 @@
 #define NORMALS 0
 //#define TRIANGLES --> (lines||points) == 0;
 #define LINES 0
-#define POINTS 1
-#define HIGHLIGHT 0
+#define POINTS 0
+#define BILINEAR 1
 
 namespace {
 
@@ -136,65 +136,73 @@ __global__
 void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+  if (x >= w || y >= h) {
+    return;
+  }
   int index = x + (y * w);
 
-  if (x < w && y < h) {
-    auto col = fragmentBuffer[index].color;
-    Fragment f = fragmentBuffer[index];
-    framebuffer[index] = fragmentBuffer[index].color;
+  auto col = fragmentBuffer[index].color;
+  Fragment f = fragmentBuffer[index];
+  framebuffer[index] = fragmentBuffer[index].color;
 
-    glm::vec3 dir_to_light(glm::normalize(glm::vec3(50.f, 50.f, 50.f) - f.eyePos));
-    glm::vec3 nor = f.eyeNor;
-    glm::vec3 dir_to_eye(glm::normalize(-f.eyePos));
-    glm::vec3 state(dir_to_light + dir_to_eye);
-    glm::vec3 texture_coloring(255.f);
+  glm::vec3 dir_to_light(glm::normalize(glm::vec3(10.f, 10.f, 20.f) - f.eyePos));
+  glm::vec3 nor = f.eyeNor;
+  glm::vec3 dir_to_eye(glm::normalize(-f.eyePos));
+  glm::vec3 state(dir_to_light + dir_to_eye);
+  glm::vec3 texture_coloring(255.f);
 
-    if (fragmentBuffer[index].dev_diffuseTex) {
-      int width = f.texture_width;
-      int height = f.texture_height;
+  // display based on visualization type
 
-      int x_min = glm::floor((width - 1.f) * f.texcoord0[0]);
-      int y_min = glm::floor((height - 1.f) * f.texcoord0[1]);
-      int x_max = (x_min + 1) % width;
-      int y_max = (y_min + 1) % height;
+  // shading for lines and points
+#if LINES || POINTS
+  framebuffer[index] = f.color;
+  return;
+#endif
 
-      // bilinear indexing: LL - lower left, LR - lower right, UL - upper left, UR - upper right
-      int LL = (x_min + y_min * width) * 3;
-      int LR = (x_max + y_min * width) * 3;
-      int UL = (x_min + y_max * width) * 3;
-      int UR = (x_max + y_max * width) * 3;
+  // shading triangles
+  if (fragmentBuffer[index].dev_diffuseTex) {
+    int width = f.texture_width;
+    int height = f.texture_height;
+    auto& tex = f.dev_diffuseTex;
 
-      glm::vec3 LLTexel(f.dev_diffuseTex[LL], f.dev_diffuseTex[LL + 1], f.dev_diffuseTex[LL + 2]);
-      glm::vec3 LRTexel(f.dev_diffuseTex[LR], f.dev_diffuseTex[LR + 1], f.dev_diffuseTex[LR + 2]);
-      glm::vec3 ULTexel(f.dev_diffuseTex[UL], f.dev_diffuseTex[UL + 1], f.dev_diffuseTex[UL + 2]);
-      glm::vec3 URTexel(f.dev_diffuseTex[UR], f.dev_diffuseTex[UR + 1], f.dev_diffuseTex[UR + 2]);
-      //Coefs for bilinear filtering
-      float lerp_t_x = x - (float)(x_min);
-      float lerp_t_y = y - (float)(y_min);
+#if BILINEAR
+    float u = f.texcoord0.x * width;  int x = glm::floor(u);
+    float v = f.texcoord0.y * height; int y = glm::floor(v);
 
-      // the bilinear lerp calc (2D lerping)
-      texture_coloring = glm::mix(glm::mix(LLTexel, LRTexel, lerp_t_x), glm::mix(ULTexel, URTexel, lerp_t_x), lerp_t_y);
+    float uRatio = u - x;
+    float vRatio = v - y;
+
+    int uv_0 = 3 * (x + y * width);
+    int uv_1 = 3 * (x + 1 + y * width);
+    int uv_2 = 3 * (x + (y + 1) * width);
+    int uv_3 = 3 * (x + 1 + (y + 1) * width);
+
+    // bilinear interp: lerp in one direction twice, then lerp between those results
+    glm::vec3 col(0.f);
+    for (int i = 0; i < 3; ++i) {
+      float val_1 = glm::mix(tex[uv_0 + i], tex[uv_1 + i], uRatio);
+      float val_2 = glm::mix(tex[uv_2 + i], tex[uv_3 + i], uRatio);
+      col[i] = glm::mix(val_1, val_2, vRatio);
     }
 
-    // final color adjustments for [0, 1] instead of [0, 255]
-    texture_coloring /= 255.f;
+    framebuffer[index] = col / 255.f;
+#else 
+    int u = f.texcoord0.x * width;
+    int v = f.texcoord0.y * height;
 
-    // display based on visualization type
-#if LINES || POINTS
-    framebuffer[index] = f.color;
-#else // TRIANGLES
-    framebuffer[index] = glm::max(0.f, glm::dot(dir_to_light, nor)) * texture_coloring;
+    int uvIndex = 3 * (u + (v * width));
+    framebuffer[index] = glm::vec3(tex[uvIndex] / 255.f, tex[uvIndex + 1] / 255.f, tex[uvIndex + 2] / 255.f);
 #endif
-
-#if HIGHLIGHT
-    // add highlight coloring
-    framebuffer[index] += glm::vec3(glm::pow(glm::max(0.f, glm::dot(nor, state)), 5.f));
-#endif
+  } else {
+    // lambert
+    float absDot = glm::abs(glm::dot(f.eyeNor, dir_to_light));
+    glm::vec3 intensity(1.5f);
+    framebuffer[index] = glm::clamp(f.color * intensity * absDot, 0.f, 1.f);
+  }
 
 #if NORMALS
-    framebuffer[index] = nor;
+  framebuffer[index] = nor;
 #endif
-  }
 }
 
 /**
