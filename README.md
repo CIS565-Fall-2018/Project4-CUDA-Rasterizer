@@ -83,7 +83,7 @@ Bad Back Face Culling | Improper Line Rasterizing | Overblown Bilinear Texturing
 ![](images/incorrectbackface.png)| ![](images/linerasterizingwrong.png)| ![](images/correcttexturing_shadedglaretoolarge.png)
 
 - bad back face culling - my directional check was reversed mistakenly
-- improper line rasterizing blooper - I had clamped to an int to late, so my indexing was out of the appropriate bounds after I had already done my bounds check.
+- improper line rasterizing blooper - I had clamped to an int too late, so my indexing was out of the appropriate bounds after I had already done my bounds check.
 - overblown bilinear texturing - never properly casted to int, yielded same mathematical indexing error as improper line rasterizing blooper but visual was different because of differeing visualization scheme
 
 ### References
