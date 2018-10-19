@@ -18,9 +18,20 @@ ________________________________________________________________________________
 
 [//]: # ( ![Progress](https://img.shields.io/badge/implementation-in%20progress-orange.svg)
 
-[Visuals](#visuals) - [Optimizations](#optimizations) - [Bloopers](#bloopers) - [References](#references) 
+[Visuals](#visuals) - [Features](#all-current-features) - [Optimizations](#optimizations) - [Bloopers](#bloopers) - [References](#references) 
 
 # Rasterizer
+
+### Visuals
+
+Triangles | Normals | Lines | Points
+:-------------------------:|:-------------------------:|:-------------------------:|:---------------------:
+![](images/duck_tex.png)| ![](images/duck_nor.png)| ![](images/duck_lines.png)| ![](images/duck_point.png)|
+![](images/cow_nor.png)| ![](images/cow_nor.png)| ![](images/cow_lines.png)| ![](images/cow_points.png)|
+![](images/milktruck_tex.png)| ![](images/milktruck_nor.png)| ![](images/milktruck_lines.png)| ![](images/milktruck_points.png)
+
+`*` note that the cow had no texture nor a base color, so it's texture was rendered by normals based on my implementation.
+`*` additionally my duck photo for points isnt showing up here atm, but it is in my images folder properly. still to figure out why markdown is doing this.
 
 ### All Current Features
 
@@ -43,25 +54,21 @@ Graphics Features
 
 `*` = additional features.
 
-### Visuals
-
-Triangles | Normals | Lines | Points
-:-------------------------:|:-------------------------:|:-------------------------:|:---------------------:
-![](images/duck_tex.png)| ![](images/duck_nor.png)| ![](images/duck_lines.png)| ![](images/duck_points.png)|
-![](images/cow_nor.png)| ![](images/cow_nor.png)| ![](images/cow_lines.png)| ![](images/cow_points.png)|
-![](images/milktruck_tex.png)| ![](images/milktruck_nor.png)| ![](images/milktruck_lines.png)| ![](images/milktruck_points.png)
-
-`*` note that the cow had no texture nor a base color, so it's texture was rendered by normals based on my implementation.
-
 ### Optimizations
 
 ![](images/raster_runtimes.png)
 
 ![](images/raster_runtimes_data.png)
 
+Here it's noticeable that the Primitive assembly is most often the costliest action. Having Back Face Culling and Mutex are the most beneficial optimizations, and adding in the overhead for bilinear interpolated texturing is extremely costly in comparison, even with the optimizations it is still slower than the runtime that doesnt have bilinear interpolation but also doesnt have any optimizations.
+
 ![](images/trivslinevspoint.png)
 
 ![](images/trivslinevspoint_data.png)
+
+There's heavy overhead for my line vertex transforms and primitive assembly because I have a helper method there for readability and the others dont have this.
+
+![](images/)
 
 ### Bloopers
 
