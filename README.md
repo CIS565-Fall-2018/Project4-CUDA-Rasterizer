@@ -48,8 +48,10 @@ Graphics Features
 Triangles | Normals | Lines | Points
 :-------------------------:|:-------------------------:|:-------------------------:|:---------------------:
 ![](images/duck_tex.png)| ![](images/duck_nor.png)| ![](images/duck_lines.png)| ![](images/duck_points.png)|
-![](images/cow_tex.png)| ![](images/cow_nor.png)| ![](images/cow_lines.png)| ![](images/cow_points.png)|
+![](images/cow_nor.png)| ![](images/cow_nor.png)| ![](images/cow_lines.png)| ![](images/cow_points.png)|
 ![](images/milktruck_tex.png)| ![](images/milktruck_nor.png)| ![](images/milktruck_lines.png)| ![](images/milktruck_points.png)
+
+`*` note that the cow had no texture nor a base color, so it's texture was rendered by normals based on my implementation.
 
 ### Optimizations
 
