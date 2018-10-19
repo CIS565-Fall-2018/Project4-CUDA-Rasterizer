@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
         //cout << "Usage: [gltf file]. Press Enter to exit" << endl;
 		//getchar();
         //return 0;
-		argv[1] = "../gltfs/flower/flower.gltf";//"../gltfs/box/box.gltf";//default gltf, relative to lauching directory which is ".....\build\"//
+		argv[1] = "../gltfs/cow/cow.gltf";//"../gltfs/box/box.gltf";//default gltf, relative to lauching directory which is ".....\build\"//
     }
 
 	tinygltf::Scene scene;
@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
 	recordStart = time(NULL);
 	record = false;
 	recordFrame = 0;
-	mode = 0;
+	mode = 0;//tile mode
     fpstracker = 0;
 
     // Launch CUDA/GL

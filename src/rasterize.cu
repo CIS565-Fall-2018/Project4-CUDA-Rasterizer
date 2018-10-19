@@ -82,7 +82,7 @@ namespace {
 			v[2] = p.v[2];
 		}
 
-		__device__ __host__ const Primitive& operator=(const Primitive& p)
+		__device__ __host__ void operator=(const Primitive& p)
 		{
 			primitiveType = p.primitiveType;
 			dev_diffuseTex = p.dev_diffuseTex;
@@ -92,8 +92,6 @@ namespace {
 			v[0] = p.v[0];
 			v[1] = p.v[1];
 			v[2] = p.v[2];
-
-			return *this;
 		}
 	};
 
@@ -936,6 +934,7 @@ void scanLineZ(int primitiveCount, const Primitive* primitives, int width, int h
 //alpha is ignored
 __device__ glm::vec3 bilinearSample(const TextureData* dev_texture, int comp, int width, int height, const glm::vec2& uv)
 {
+	int size = width * height * comp;
 	float fracU = uv.x * width;
 	int floorU = fracU;
 	fracU -= floorU;
@@ -944,10 +943,10 @@ __device__ glm::vec3 bilinearSample(const TextureData* dev_texture, int comp, in
 	fracV -= floorV;
 	int ceilU = glm::clamp(floorU + 1, 0, width - 1);
 	int ceilV = glm::clamp(floorV + 1, 0, height - 1);
-	int indexFUFV = comp * (floorU + floorV * width);
-	int indexFUCV = comp * (floorU + ceilV * width);
-	int indexCUFV = comp * (ceilU + floorV * width);
-	int indexCUCV = comp * (ceilU + ceilV * width);
+	int indexFUFV = glm::clamp(comp * (floorU + floorV * width), 0, size-1);
+	int indexFUCV = glm::clamp(comp * (floorU + ceilV * width), 0, size - 1);
+	int indexCUFV = glm::clamp(comp * (ceilU + floorV * width), 0, size - 1);
+	int indexCUCV = glm::clamp(comp * (ceilU + ceilV * width), 0, size - 1);
 	glm::vec3 colFUFV(dev_texture[indexFUFV] / 255.f, dev_texture[indexFUFV + 1] / 255.f, dev_texture[indexFUFV + 2] / 255.f);
 	glm::vec3 colFUCV(dev_texture[indexFUCV] / 255.f, dev_texture[indexFUCV + 1] / 255.f, dev_texture[indexFUCV + 2] / 255.f);
 	glm::vec3 colCUFV(dev_texture[indexCUFV] / 255.f, dev_texture[indexCUFV + 1] / 255.f, dev_texture[indexCUFV + 2] / 255.f);
@@ -1147,15 +1146,14 @@ bool intersectLineSegments(const glm::vec2& a1, const glm::vec2& a2, const glm::
 }
 
 __device__
-bool triangleInTile(const glm::vec3 v[3], 
-	//xMin, xMax, yMin, yMax
-	const float MinMaxXY[4])
+bool triangleInTile(const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
+	float xMin, float xMax, float yMin, float yMax)
 {
-	glm::vec3 min = glm::min(v[0], glm::min(v[1], v[2]));
-	glm::vec3 max = glm::max(v[0], glm::max(v[1], v[2]));
-	
+	glm::vec3 min = glm::min(v0, glm::min(v1, v2));
+	glm::vec3 max = glm::max(v0, glm::max(v1, v2));
+
 	//early rejection
-	if ((max.x < MinMaxXY[0]) || (min.x > MinMaxXY[1]) || (max.y < MinMaxXY[2]) || (min.y > MinMaxXY[3]))
+	if ((max.x < xMin) || (min.x > xMax) || (max.y < yMin) || (min.y > yMax))
 	{
 		return false;
 	}
@@ -1167,8 +1165,6 @@ template<int tileWidth, int tileHeight>
 __global__
 void scanLineTile(int primitiveCount, const Primitive* primitives, int width, int height, Fragment* fragments)
 {
-	//__shared__ Fragment shared_fragments[tileWidth * tileHeight];//what's the point of this? we are launching threads per pixel
-	//__shared__ int shared_depths[tileWidth * tileHeight];//what's the point of this? we are launching threads per pixel
 	__shared__ Primitive shared_primitives[PRIM_PER_BLOCK_MAX];
 	__shared__ int shared_primitives_count;
 
@@ -1177,7 +1173,6 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 	int pixelId = pixelX + pixelY * width;
 	int threadId = threadIdx.x + threadIdx.y * blockDim.x;
 
-	//shared_depths[threadId] = INT_MAX;
 	int depth = INT_MAX;
 
 	int threadCount = blockDim.x * blockDim.y;
@@ -1193,14 +1188,15 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 		if (temp < primitiveCount)
 		{
 			Primitive tempPrimitive = primitives[temp];
-			glm::vec3 tri[3] = { glm::vec3(tempPrimitive.v[0].pos), glm::vec3(tempPrimitive.v[1].pos) ,glm::vec3(tempPrimitive.v[2].pos) };
-			float MinMaxXY[4] = { (float)blockIdx.x * blockDim.x, (blockIdx.x + 1.f) * blockDim.x, (float)blockIdx.y * blockDim.y, (blockIdx.y + 1.f) * blockDim.y };
-			if (triangleInTile(tri, MinMaxXY))//inside
+			//inside
+			if(triangleInTile(glm::vec3(tempPrimitive.v[0].pos), glm::vec3(tempPrimitive.v[1].pos), glm::vec3(tempPrimitive.v[2].pos), 
+				(float)blockIdx.x * blockDim.x, (blockIdx.x + 1.f) * blockDim.x, (float)blockIdx.y * blockDim.y, (blockIdx.y + 1.f) * blockDim.y))
 			{
 				int oldPrimitiveCount = atomicAdd(&shared_primitives_count, 1);
 				//printf("%d,%d:%d,%d:%d\n", blockIdx.x, blockIdx.y, threadIdx.x, threadIdx.y, oldPrimitiveCount);
 				if (oldPrimitiveCount >= 0 && oldPrimitiveCount < PRIM_PER_BLOCK_MAX)
 				{
+					//printf("%d\n", oldPrimitiveCount);
 					shared_primitives[oldPrimitiveCount] = tempPrimitive;
 				}
 				else
@@ -1218,6 +1214,7 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 	//printf("%d\n", shared_primitives_count);
 	int actual_shared_primitives_count = shared_primitives_count < PRIM_PER_BLOCK_MAX ? shared_primitives_count : PRIM_PER_BLOCK_MAX;
 
+
 	if (actual_shared_primitives_count > 0 && pixelX < width && pixelY < height)
 	{
 		glm::vec2 fragmentPos(pixelX, pixelY);
@@ -1228,35 +1225,34 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 		//depth pass
 		for (int i = 0; i < actual_shared_primitives_count; i++)
 		{
-			Primitive primitive = shared_primitives[i];//copy so that no global memory access in this function anymore
+			glm::vec3 v0(shared_primitives[i].v[0].pos);//copy so that no global memory access in this function anymore
+			glm::vec3 v1(shared_primitives[i].v[1].pos);
+			glm::vec3 v2(shared_primitives[i].v[2].pos);
+
+			glm::vec3 p0(v0.x, v0.y, 0);
+			glm::vec3 p1(v1.x, v1.y, 0);
+			glm::vec3 p2(v2.x, v2.y, 0);
 			
-			glm::vec3 p0(primitive.v[0].pos.x, primitive.v[0].pos.y, 0);
-			glm::vec3 p1(primitive.v[1].pos.x, primitive.v[1].pos.y, 0);
-			glm::vec3 p2(primitive.v[2].pos.x, primitive.v[2].pos.y, 0);
-
-			//float bary = barycentricInterpolate<float>(P, p0, p1, p2, 1.f, 1.f, 1.f);
-			//if (glm::abs(bary - 1.0) < EPSILON)//inside the triangle
-
 			glm::vec3 tri[3];
-			tri[0] = glm::vec3(primitive.v[0].pos);
-			tri[1] = glm::vec3(primitive.v[1].pos);
-			tri[2] = glm::vec3(primitive.v[2].pos);
+			tri[0] = v0;
+			tri[1] = v1;
+			tri[2] = v2;
 
 			glm::vec3 baryCoords = calculateBarycentricCoordinate(tri, glm::vec2(pixelX, pixelY));
 			bool isInsideTriangle = isBarycentricCoordInBounds(baryCoords);
 			if (isInsideTriangle)
 			{
 				float fragmentZ = barycentricInterpolate(P, p0, p1, p2,
-					primitive.v[0].pos.z,
-					primitive.v[1].pos.z,
-					primitive.v[2].pos.z);
+					v0.z,
+					v1.z,
+					v2.z);
 
 				//depth clip, OpenGL and D3D do it in clip space, we do it in screen space due to the structure of our pipeline
 				if (fragmentZ > 0 && fragmentZ < 1)
 				{
 
 					int intZ = fragmentZ * INT_MAX;
-					if (intZ < depth)//shared_depths[threadId])
+					if (intZ < depth)
 					{
 						depth = intZ;
 					}
@@ -1271,10 +1267,7 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 			glm::vec3 p0(primitive.v[0].pos.x, primitive.v[0].pos.y, 0);
 			glm::vec3 p1(primitive.v[1].pos.x, primitive.v[1].pos.y, 0);
 			glm::vec3 p2(primitive.v[2].pos.x, primitive.v[2].pos.y, 0);
-
-			//float bary = barycentricInterpolate<float>(P, p0, p1, p2, 1.f, 1.f, 1.f);
-			//if (glm::abs(bary-1.0) < EPSILON)//inside the triangle
-
+			
 			glm::vec3 tri[3];
 			tri[0] = glm::vec3(primitive.v[0].pos);
 			tri[1] = glm::vec3(primitive.v[1].pos);
@@ -1298,6 +1291,7 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 					//depth test
 					if (intZ <= depth)//shared_depths[threadId])
 					{
+						depth = intZ;
 						//for perspective correct interpolation
 						float w = 1.f / barycentricInterpolate(P, p0, p1, p2,
 							1.f / primitive.v[0].pos.w,
@@ -1320,7 +1314,7 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 							primitive.v[1].texcoord0 / primitive.v[1].pos.w,
 							primitive.v[2].texcoord0 / primitive.v[2].pos.w);
 
-						fragment.dev_diffuseTex = primitive.dev_diffuseTex;//this should be an uniform
+						fragment.dev_diffuseTex = primitive.dev_diffuseTex;
 
 						fragment.color = primitive.dev_diffuseTex == NULL ? glm::vec3(1, 1, 1) :
 							bilinearSample(primitive.dev_diffuseTex,
@@ -1329,8 +1323,6 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 								primitive.diffuseTexHeight,
 								fragment.texcoord0);
 
-						//copy the fragment to fragment buffer
-						//shared_fragments[threadId] = fragment;
 						bingo = true;
 					}
 				}
@@ -1338,7 +1330,7 @@ void scanLineTile(int primitiveCount, const Primitive* primitives, int width, in
 		}
 
 		//write back
-		if(bingo) fragments[pixelId] = fragment;//shared_fragments[threadId];
+		if(bingo) fragments[pixelId] = fragment;
 	}
 }
 
@@ -1394,10 +1386,9 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 	initDepth << <blockCount2d, blockSize2d >> > (width, height, dev_depth);
-
+	
 	// TODO: rasterize
 	cudaDeviceSynchronize();
-
 	if (mode == 0)
 	{
 		dim3 numTreadsPerBlock(128);
