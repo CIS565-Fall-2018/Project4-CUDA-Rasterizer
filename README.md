@@ -18,7 +18,7 @@ ________________________________________________________________________________
 
 [//]: # ( ![Progress](https://img.shields.io/badge/implementation-in%20progress-orange.svg)
 
-[Introduction](#introduction) - [Visuals](#visuals) - [Optimizations](#optimization-features) - [Bloopers](#bloopers) - [References](#references) 
+[Visuals](#visuals) - [Optimizations](#optimizations) - [Bloopers](#bloopers) - [References](#references) 
 
 # Rasterizer
 
@@ -43,16 +43,12 @@ Graphics Features
 
 `*` = additional features.
 
-### Introduction
-
 ### Visuals
 
 Triangles | Normals | Lines | Points
 :-------------------------:|:-------------------------:|:-------------------------:|:---------------------:
-![](images/duck_tex.png)| ![](images/duck_nor.png)| ![](images/duck_lines.png)| ![](images/duck_points.png)
-:-------------------------:|:-------------------------:|:-------------------------:|:---------------------:
-![](images/cow_tex.png)| ![](images/cow_nor.png)| ![](images/cow_lines.png)| ![](images/cow_points.png)
-:-------------------------:|:-------------------------:|:-------------------------:|:---------------------:
+![](images/duck_tex.png)| ![](images/duck_nor.png)| ![](images/duck_lines.png)| ![](images/duck_points.png)|
+![](images/cow_tex.png)| ![](images/cow_nor.png)| ![](images/cow_lines.png)| ![](images/cow_points.png)|
 ![](images/milktruck_tex.png)| ![](images/milktruck_nor.png)| ![](images/milktruck_lines.png)| ![](images/milktruck_points.png)
 
 ### Optimizations
