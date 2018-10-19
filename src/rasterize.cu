@@ -17,6 +17,7 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 #define BACKFACE_CULL 1
 #define MUTEX 1
@@ -25,6 +26,8 @@
 #define LINES 0
 #define POINTS 0
 #define BILINEAR 1
+
+#define TIME 1
 
 namespace {
 
@@ -937,6 +940,17 @@ __global__ void computeRasterization(const int width, const int height, const in
   } // end: from y_min to y_max
 }
 
+// For Runtime Comparison - taken and modified from my own CUDA Pathtracer code
+void startTimer(std::chrono::high_resolution_clock::time_point& timer) {
+  timer = std::chrono::high_resolution_clock::now();
+}
+
+// returns duration
+float endTimer(std::chrono::high_resolution_clock::time_point& timer) {
+  auto time_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> duro = time_end - timer;
+  return (float)(duro.count());
+}
 
 /**
  * Perform rasterization.
@@ -952,6 +966,16 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
   dim3 numThreadsPerBlock(128);
 
+  // create timers for runtime checking
+  std::chrono::high_resolution_clock::time_point vert_time;
+  std::chrono::high_resolution_clock::time_point primitive_assembly_time;
+  std::chrono::high_resolution_clock::time_point rasterization_time;
+  std::chrono::high_resolution_clock::time_point render_time;
+  float vert_duration = 0.f;
+  float primitive_duration = 0.f;
+  float rasterization_duration = 0.f;
+  float render_duration = 0.f;
+
 	// Vertex Process & primitive assembly
 	{
     curPrimitiveBeginId = 0;
@@ -966,14 +990,20 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
+        startTimer(vert_time);
 				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height);
-				checkCUDAError("Vertex Processing");
-				cudaDeviceSynchronize();
-				_primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
+        vert_duration = endTimer(vert_time);
+        checkCUDAError("Vertex Processing");
+				
+        cudaDeviceSynchronize();
+				
+        startTimer(primitive_assembly_time);
+        _primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
 					(p->numIndices, 
 					curPrimitiveBeginId, 
 					dev_primitives, 
 					*p);
+        primitive_duration = endTimer(primitive_assembly_time);
 				checkCUDAError("Primitive Assembly");
 
 				curPrimitiveBeginId += p->numPrimitives;
@@ -987,6 +1017,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	initDepth << <blockCount2d, blockSize2d >> >(width, height, dev_depth);
 	
 	// rasterize
+  startTimer(rasterization_time);
   int numBlocks = (totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x;
 #if POINTS
   computePointsRasterization << <numBlocks, numThreadsPerBlock >> > (
@@ -999,13 +1030,23 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
     width, height, totalNumPrimitives, dev_primitives, dev_fragmentBuffer,
     dev_depth, dev_mutex);
 #endif
+  rasterization_duration = endTimer(rasterization_time);
 
   // Copy depthbuffer colors into framebuffer
+  startTimer(rasterization_time);
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer);
+  rasterization_duration = endTimer(rasterization_time);
 	checkCUDAError("fragment shader");
   // Copy framebuffer into OpenGL buffer for OpenGL previewing
   sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
   checkCUDAError("copy render result to pbo");
+
+#if TIME
+  printf("Time in milliseconds for vert transform: %f\n", vert_duration);
+  printf("Time in milliseconds for primitive assembly: %f\n", primitive_duration);
+  printf("Time in milliseconds for rasterization: %f\n", rasterization_duration);
+  printf("Time in milliseconds for rendering: %f\n", render_duration);
+#endif
 }
 
 /**
