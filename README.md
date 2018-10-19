@@ -31,7 +31,7 @@ Triangles | Normals | Lines | Points
 ![](images/milktruck_tex.png)| ![](images/milktruck_nor.png)| ![](images/milktruck_lines.png)| ![](images/milktruck_points.png)
 
 `*` note that the cow had no texture nor a base color, so it's texture was rendered by normals based on my implementation.
-`*` additionally my duck photo for points isnt showing up here atm, but it is in my images folder properly. still to figure out why markdown is doing this.
+`**` not all textures are double sided, so I have the normals acting as a base color in place for no texture, just for visual appeal.
 
 ### All Current Features
 
@@ -68,7 +68,13 @@ Here it's noticeable that the Primitive assembly is most often the costliest act
 
 There's heavy overhead for my line vertex transforms and primitive assembly because I have a helper method there for readability and the others dont have this.
 
-![](images/)
+![](images/demo_persp_divide.gif)
+
+The above gif demos perspective divide - a rasterizing technique to force a perspective based on z values.
+
+![](images/milktruck_tex.png)
+
+The above gif demos what happens when mutex is turned off. Race conditions create a flickering that shouldnt always be there. It occurs because without the atomic mutex check, the fragment threads are running simultaneously and doing depth checks based on the value currently in the fragment buffer at a location. Since theyre running simulatiously, it's not guaranteed that when one checks a depth at that index, that that is the same depth being overwritten by the time that thread gets to filling in that fragment buffer's index - aka a race condition. Using mutex allows us to wait until the fragment is available to be checked, then it does a depth check as a normal rasterizer should.
 
 ### Bloopers
 
