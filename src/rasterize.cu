@@ -23,7 +23,7 @@
 #define MUTEX 1
 #define NORMALS 0
 //#define TRIANGLES --> (lines||points) == 0;
-#define LINES 0
+#define LINES 1
 #define POINTS 0
 #define BILINEAR 1
 
