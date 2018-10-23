@@ -15,6 +15,12 @@ CUDA Rasterizer
 - * Reference to the First Person shooter [Counter Strike](https://en.wikipedia.org/wiki/Counter-Strike)
 - * Not very accurate of a first person shooter, but the enemies are ducks and pressing the left button deletes them :)
 
+![](truck1.png)
+![](truck2.png)
+![](truck3.png)
+![](truck4.png)
+![](truck5.png)
+
 ## What is a rasterizer?
 
 A rasterizer is a method of rendering images by forming triangles and converting these triangles to pixels on the screen
