@@ -17,12 +17,11 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <thrust/device_vector.h>
-#include <thrust/remove.h>
 
 #define Z_VALUE_PRECISION 10000.0f
 #define PERSPECTIVE_COLOR 0
 #define INTENSITY 1.0f
+#define SCALE_FACTOR 2
 
 namespace {
 
@@ -113,16 +112,14 @@ static Primitive *dev_primitives = NULL;
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
 
-thrust::device_ptr<int> dev_thrust_primitives;
-
 static int * dev_depth = NULL;	// you might need this buffer when doing depth test
 
 /**
  * Called once at the beginning of the program to allocate memory.
  */
 void rasterizeInit(int w, int h) {
-    width = w;
-    height = h;
+    width = w * SCALE_FACTOR;
+    height = h * SCALE_FACTOR;
 	  cudaFree(dev_fragmentBuffer);
   	cudaMalloc(&dev_fragmentBuffer, width * height * sizeof(Fragment));
   	cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
@@ -567,7 +564,6 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 	// 3. Malloc for dev_primitives
 	{
 		cudaMalloc(&dev_primitives, totalNumPrimitives * sizeof(Primitive));
-    dev_thrust_primitives = thrust::device_ptr<Primitive>(dev_primitives);
 	}
 	
 
@@ -749,18 +745,29 @@ __global__
 void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
   int x = (blockIdx.x * blockDim.x) + threadIdx.x;
   int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-  int index = x + (y * w);
 
-  if (x < w && y < h) {
+  if (x < (w / SCALE_FACTOR) && y < (h / SCALE_FACTOR)) {
     glm::vec3 color;
-    color.x = glm::clamp(image[index].x, 0.0f, 1.0f) * 255.0;
-    color.y = glm::clamp(image[index].y, 0.0f, 1.0f) * 255.0;
-    color.z = glm::clamp(image[index].z, 0.0f, 1.0f) * 255.0;
+    // average the red green and blue
+    float scaleSquared = SCALE_FACTOR * SCALE_FACTOR;
+
+    for (int i = 0; i < SCALE_FACTOR; ++i)
+    {
+      for (int j = 0; j < SCALE_FACTOR; ++j)
+      {
+        color.r += glm::clamp(image[(x*SCALE_FACTOR + i) + (y*SCALE_FACTOR + j) * w].x, 0.0f, 1.0f) * 255.0;
+        color.g += glm::clamp(image[(x*SCALE_FACTOR + i) + (y*SCALE_FACTOR + j) * w].y, 0.0f, 1.0f) * 255.0;
+        color.b += glm::clamp(image[(x*SCALE_FACTOR + i) + (y*SCALE_FACTOR + j) * w].z, 0.0f, 1.0f) * 255.0;
+      }
+    }
+    
+    int index = x + (y * (w / SCALE_FACTOR));
+
     // Each thread writes one pixel location in the texture (textel)
     pbo[index].w = 0;
-    pbo[index].x = color.x;
-    pbo[index].y = color.y;
-    pbo[index].z = color.z;
+    pbo[index].x = color.x / scaleSquared;
+    pbo[index].y = color.y / scaleSquared;
+    pbo[index].z = color.z / scaleSquared;
   }
 }
 
@@ -807,6 +814,8 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 
 		checkCUDAError("Vertex Processing and Primitive Assembly");
 	}
+
+
 
   // number of blocks / size of blocks should be proportional to numPrimitives
   int blockSize = 32; // size of a warp
