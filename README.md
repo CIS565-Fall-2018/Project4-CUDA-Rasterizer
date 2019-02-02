@@ -1,12 +1,6 @@
 CUDA Rasterizer
 ===============
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
-
-* Lan Lou
-	*  [github](https://github.com/LanLou123).
-* Tested on: Windows 10, i7-6700HQ @ 2.60GHz 16GB, GTX 1070 8GB (Personal Laptop)
-
 ### Sample Rasterization
 
 #### ```resolution```: 900X900 ```GLTF model```: cesiummilktruck ```shader``` : blinn_phong perspective corrected bilinear textureed
